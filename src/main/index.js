@@ -1,9 +1,76 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { join, normalize } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupLauncher } from './launcher'
 import net from 'net'
+import fs from 'fs'
+
+const LAUNCHER_CONFIG_FILE = 'launcher-config.json'
+let launchPathIpcRegistered = false
+
+function getConfigPath() {
+  return join(app.getPath('userData'), LAUNCHER_CONFIG_FILE)
+}
+
+function readLauncherConfig() {
+  try {
+    const configPath = getConfigPath()
+    if (!fs.existsSync(configPath)) return {}
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function writeLauncherConfig(nextConfig) {
+  const configPath = getConfigPath()
+  fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2), 'utf-8')
+}
+
+function isWindowsDriveRoot(dirPath) {
+  if (process.platform !== 'win32') return false
+  const normalized = normalize(dirPath)
+  return /^[A-Za-z]:\\?$/.test(normalized)
+}
+
+function registerLaunchPathIpc(mainWindow) {
+  if (launchPathIpcRegistered) return
+  launchPathIpcRegistered = true
+
+  ipcMain.handle('get-launch-directory', async () => {
+    const config = readLauncherConfig()
+    const launchDirectory = config.launchDirectory
+    if (!launchDirectory) return null
+    if (isWindowsDriveRoot(launchDirectory)) {
+      return null
+    }
+    return launchDirectory
+  })
+
+  ipcMain.handle('choose-launch-directory', async () => {
+    const config = readLauncherConfig()
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '마인크래프트 설치 위치 선택',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: config.launchDirectory || app.getPath('documents')
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
+    }
+
+    const launchDirectory = result.filePaths[0]
+    if (isWindowsDriveRoot(launchDirectory)) {
+      return {
+        success: false,
+        error: '드라이브 루트(E:\\ 같은 폴더)는 설치 위치로 선택할 수 없습니다. 하위 폴더를 선택해주세요.'
+      }
+    }
+    writeLauncherConfig({ ...config, launchDirectory })
+    return { success: true, launchDirectory }
+  })
+}
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -36,6 +103,7 @@ function createWindow() {
   }
 
   setupLauncher(mainWindow)
+  registerLaunchPathIpc(mainWindow)
 }
 
 // ===== Server Status Check Logic =====

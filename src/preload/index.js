@@ -4,6 +4,9 @@ import { electronAPI } from '@electron-toolkit/preload'
 // Custom APIs for renderer
 const api = {
   msLogin: () => ipcRenderer.invoke('ms-login'),
+  getPlayerSummary: (args) => ipcRenderer.invoke('get-player-summary', args),
+  getLaunchDirectory: () => ipcRenderer.invoke('get-launch-directory'),
+  chooseLaunchDirectory: () => ipcRenderer.invoke('choose-launch-directory'),
   launchGame: (args) => ipcRenderer.invoke('launch-game', args),
   onStatusUpdate: (callback) => {
     ipcRenderer.removeAllListeners('status-update')
@@ -12,6 +15,10 @@ const api = {
   onProgress: (callback) => {
     ipcRenderer.removeAllListeners('download-progress')
     ipcRenderer.on('download-progress', (_, progress) => callback(progress))
+  },
+  onInstallProgress: (callback) => {
+    ipcRenderer.removeAllListeners('install-progress')
+    ipcRenderer.on('install-progress', (_, payload) => callback(payload))
   },
   onGameClosed: (callback) => {
     ipcRenderer.removeAllListeners('game-closed')

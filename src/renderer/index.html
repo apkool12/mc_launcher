@@ -29,6 +29,10 @@
             </div>
             <img id="user-avatar" src="" alt="Avatar" class="avatar" />
           </div>
+          <div class="player-summary hidden" id="player-summary">
+            <span id="summary-badges" class="summary-item">배지: -</span>
+            <span id="summary-owned" class="summary-item">도감 보유종: -</span>
+          </div>
         </div>
       </div>
 
@@ -66,6 +70,18 @@
             <button id="btn-play" class="action-btn play-mode hidden">
               <span>START ADVENTURE</span>
             </button>
+            <div class="play-progress hidden" id="progress-container">
+              <div class="play-progress-head">
+                <div class="status-left">
+                  <span id="progress-stage" class="progress-stage">PREPARE</span>
+                  <p id="status-text" class="status-text">설치 준비 중...</p>
+                </div>
+                <span id="progress-percent" class="progress-percent">0%</span>
+              </div>
+              <div class="progress-track">
+                <div id="progress-fill" class="progress-fill"></div>
+              </div>
+            </div>
           </div>
 
           <div class="meta-group animate-pop" style="--d: 0.7s">
@@ -74,11 +90,21 @@
         </div>
       </div>
 
-      <!-- Progress -->
-      <div class="progress-wrap hidden" id="progress-container">
-        <div id="progress-fill" class="progress-fill"></div>
-        <p id="status-text" class="status-text">다운로드 중...</p>
+      <!-- Modal -->
+      <div class="modal-overlay hidden" id="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+        <div class="modal-card" id="modal-card">
+          <div class="modal-header">
+            <span id="modal-title" class="modal-title">알림</span>
+          </div>
+          <div class="modal-body">
+            <p id="modal-message" class="modal-message"></p>
+          </div>
+          <div class="modal-footer">
+            <button id="modal-ok" class="modal-btn" type="button">확인</button>
+          </div>
+        </div>
       </div>
+
     </div>
     <script type="module" src="./src/renderer.js"></script>
   </body>

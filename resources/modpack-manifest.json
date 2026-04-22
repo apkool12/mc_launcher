@@ -1,0 +1,10 @@
+{
+  "version": "mod",
+  "generatedAt": "2026-04-15T15:05:18.928Z",
+  "package": {
+    "url": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack.zip",
+    "sha256": "2193d4e2ace5ee75f982497bd2d0a362f1d22315d934d5625edf58b1d5962147",
+    "size": 499881321,
+    "extractTo": "."
+  }
+}
