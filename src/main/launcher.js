@@ -903,8 +903,11 @@ function applyMinecraftOptions(root, settings) {
 
   const master = clampPercent(settings.masterVolume, 100) / 100
   const music = clampPercent(settings.musicVolume, 30) / 100
+  const language = String(settings.minecraftLanguage || 'ko_kr').toLowerCase()
+  const minecraftLanguage = ['ko_kr', 'en_us'].includes(language) ? language : 'ko_kr'
   upsertOptionLine(lines, 'soundCategory_master', master.toFixed(2))
   upsertOptionLine(lines, 'soundCategory_music', music.toFixed(2))
+  upsertOptionLine(lines, 'lang', minecraftLanguage)
 
   fs.writeFileSync(optionsPath, `${lines.join('\n')}\n`, 'utf-8')
 }

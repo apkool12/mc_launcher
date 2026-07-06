@@ -33,6 +33,7 @@ const settingsServer = document.getElementById('settings-server')
 const ramMin = document.getElementById('ram-min')
 const ramMax = document.getElementById('ram-max')
 const autoConnect = document.getElementById('auto-connect')
+const minecraftLanguage = document.getElementById('minecraft-language')
 const masterVolume = document.getElementById('master-volume')
 const musicVolume = document.getElementById('music-volume')
 const masterVolumeValue = document.getElementById('master-volume-value')
@@ -46,7 +47,8 @@ let launcherSettings = {
   memoryMaxGb: 4,
   autoConnect: true,
   masterVolume: 100,
-  musicVolume: 30
+  musicVolume: 30,
+  minecraftLanguage: 'ko_kr'
 }
 
 function showModal({ title = '알림', message = '', variant = 'info' }) {
@@ -126,7 +128,12 @@ function renderSettings(settings = launcherSettings, server) {
     memoryMaxGb: clampNumber(settings.memoryMaxGb, 2, 16, 4),
     autoConnect: settings.autoConnect !== false,
     masterVolume: clampNumber(settings.masterVolume, 0, 100, 100),
-    musicVolume: clampNumber(settings.musicVolume, 0, 100, 30)
+    musicVolume: clampNumber(settings.musicVolume, 0, 100, 30),
+    minecraftLanguage: ['ko_kr', 'en_us'].includes(
+      String(settings.minecraftLanguage || '').toLowerCase()
+    )
+      ? String(settings.minecraftLanguage).toLowerCase()
+      : 'ko_kr'
   }
 
   if (launcherSettings.memoryMaxGb < launcherSettings.memoryMinGb) {
@@ -139,6 +146,7 @@ function renderSettings(settings = launcherSettings, server) {
   ramMin.value = String(launcherSettings.memoryMinGb)
   ramMax.value = String(launcherSettings.memoryMaxGb)
   autoConnect.checked = launcherSettings.autoConnect
+  minecraftLanguage.value = launcherSettings.minecraftLanguage
   masterVolume.value = String(launcherSettings.masterVolume)
   musicVolume.value = String(launcherSettings.musicVolume)
   masterVolumeValue.textContent = `${launcherSettings.masterVolume}%`
@@ -155,6 +163,7 @@ function readSettingsForm() {
     memoryMinGb,
     memoryMaxGb,
     autoConnect: autoConnect.checked,
+    minecraftLanguage: minecraftLanguage.value || 'ko_kr',
     masterVolume: clampNumber(masterVolume.value, 0, 100, 100),
     musicVolume: clampNumber(musicVolume.value, 0, 100, 30)
   }

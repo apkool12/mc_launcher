@@ -14,7 +14,8 @@ const DEFAULT_LAUNCHER_SETTINGS = {
   memoryMaxGb: 4,
   autoConnect: true,
   masterVolume: 100,
-  musicVolume: 30
+  musicVolume: 30,
+  minecraftLanguage: 'ko_kr'
 }
 let launchPathIpcRegistered = false
 
@@ -46,6 +47,7 @@ function normalizeLauncherSettings(config) {
   const rawMemoryMax = Number(config.memoryMaxGb)
   const rawMasterVolume = Number(config.masterVolume)
   const rawMusicVolume = Number(config.musicVolume)
+  const rawMinecraftLanguage = String(config.minecraftLanguage || '').toLowerCase()
   const memoryMinGb = Math.max(1, Math.min(12, Number.isFinite(rawMemoryMin) ? rawMemoryMin : 2))
   const memoryMaxGb = Math.max(
     memoryMinGb,
@@ -59,6 +61,9 @@ function normalizeLauncherSettings(config) {
     0,
     Math.min(100, Number.isFinite(rawMusicVolume) ? rawMusicVolume : 30)
   )
+  const minecraftLanguage = ['ko_kr', 'en_us'].includes(rawMinecraftLanguage)
+    ? rawMinecraftLanguage
+    : 'ko_kr'
 
   return {
     ...DEFAULT_LAUNCHER_SETTINGS,
@@ -71,7 +76,8 @@ function normalizeLauncherSettings(config) {
     memoryMaxGb,
     autoConnect: config.autoConnect !== false,
     masterVolume,
-    musicVolume
+    musicVolume,
+    minecraftLanguage
   }
 }
 
