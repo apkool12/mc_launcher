@@ -1,6 +1,6 @@
 {
   "version": "mod",
-  "generatedAt": "2026-04-15T15:05:18.928Z",
+  "generatedAt": "2026-07-06T01:34:00.000Z",
   "game": {
     "minecraftVersion": "1.20.1",
     "loader": "forge",
@@ -21,8 +21,8 @@
   },
   "package": {
     "url": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack.zip",
-    "sha256": "2193d4e2ace5ee75f982497bd2d0a362f1d22315d934d5625edf58b1d5962147",
-    "size": 499881321,
+    "sha256": "7b75b2a00dbf46c2f86a0b5473cb5c257b73544998552b7463b8d9e33237a910",
+    "size": 680342295,
     "extractTo": "."
   }
 }
