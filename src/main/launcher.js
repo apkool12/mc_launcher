@@ -20,6 +20,7 @@ const DEFAULT_FORGE_VERSION = '47.4.0'
 const DEFAULT_SERVER_HOST = 'localhost'
 const DEFAULT_SERVER_PORT = 25565
 const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
+const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
 
 function getDefaultLaunchDirectory() {
   return path.join(app.getPath('appData'), 'ByteMC Launcher')
@@ -1061,6 +1062,7 @@ export function setupLauncher(mainWindow) {
           custom: versionId
         },
         memory: memoryConfig,
+        customArgs: loader === 'forge' ? FORGE_JVM_ARGS : undefined,
         quickPlay:
           serverConfig.quickConnect && settings?.autoConnect !== false
             ? {
