@@ -7,6 +7,7 @@ import fs from 'fs'
 import { MongoClient } from 'mongodb'
 import crypto from 'crypto'
 import AdmZip from 'adm-zip'
+import { spawnSync } from 'child_process'
 
 const launcher = new Client()
 let mongoClientPromise = null
@@ -22,6 +23,45 @@ const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
 
 function getDefaultLaunchDirectory() {
   return path.join(app.getPath('appData'), 'ByteMC Launcher')
+}
+
+function getJavaExecutable(javaHome) {
+  if (!javaHome) return null
+  const executable = process.platform === 'win32' ? 'java.exe' : 'java'
+  return path.join(javaHome, 'bin', executable)
+}
+
+function isJava17(javaPath) {
+  if (!javaPath || !existsFile(javaPath)) return false
+
+  try {
+    const result = spawnSync(javaPath, ['-version'], { encoding: 'utf-8' })
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`
+    return /version "17\./.test(output)
+  } catch {
+    return false
+  }
+}
+
+function resolveJava17Path() {
+  const candidates = [
+    getJavaExecutable(process.env.JAVA_17_HOME),
+    getJavaExecutable(process.env.JDK_17_HOME),
+    getJavaExecutable(process.env.JAVA_HOME)
+  ].filter(Boolean)
+
+  if (process.platform === 'darwin') {
+    try {
+      const javaHome = spawnSync('/usr/libexec/java_home', ['-v', '17'], {
+        encoding: 'utf-8'
+      }).stdout.trim()
+      candidates.unshift(getJavaExecutable(javaHome))
+    } catch {
+      // Continue with the generic candidates.
+    }
+  }
+
+  return candidates.find((candidate) => isJava17(candidate)) || null
 }
 
 function emitInstallProgress(mainWindow, percent, message, stage = 'PREPARE') {
@@ -300,12 +340,17 @@ async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow
   emitInstallProgress(mainWindow, 10, `Forge ${targetForge} 설치 중...`, 'FORGE')
 
   const [forgeMcVersion, ...forgeVersionParts] = targetForge.split('-')
+  const java17Path = resolveJava17Path()
+  if (java17Path) {
+    mainWindow.webContents.send('status-update', `Forge ${targetForge} 설치 중... (Java 17)`)
+  }
   const installResult = await xmclInstaller.installForge(
     {
       mcversion: forgeMcVersion || mcVersion,
       version: forgeVersionParts.join('-') || String(forgeVersion || DEFAULT_FORGE_VERSION)
     },
-    root
+    root,
+    java17Path ? { java: java17Path } : undefined
   )
   const forgeVersionId =
     typeof installResult === 'string'
@@ -912,6 +957,7 @@ export function setupLauncher(mainWindow) {
       })
       const serverAddress = formatServerAddress(serverConfig)
       applyMinecraftOptions(root, settings)
+      const java17Path = resolveJava17Path()
 
       mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
       emitInstallProgress(mainWindow, 100, '설치 준비 완료, 게임 시작', 'LAUNCH')
@@ -919,6 +965,7 @@ export function setupLauncher(mainWindow) {
       const opts = {
         authorization: mclcAuth,
         root: root,
+        ...(java17Path ? { javaPath: java17Path } : {}),
         version: {
           number: mcVersion,
           type: 'release',
