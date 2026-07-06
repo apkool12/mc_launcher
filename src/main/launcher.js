@@ -1,6 +1,6 @@
 import { Client } from 'minecraft-launcher-core'
 import { Auth } from 'msmc'
-import { app, ipcMain, shell } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
 import path from 'path'
 import * as xmclInstaller from '@xmcl/installer'
 import fs from 'fs'
@@ -144,12 +144,18 @@ async function ensureWaterMediaVlc({ root, mainWindow }) {
     }
   }
 
-  const statePath = path.join(root, STATE_FILE)
-  const state = readJsonSafe(statePath, {})
-  const now = Date.now()
-  const promptedAt = Number(state.vlcDownloadPromptedAt || 0)
-  if (!promptedAt || now - promptedAt > 24 * 60 * 60 * 1000) {
-    writeJsonSafe(statePath, { ...state, vlcDownloadPromptedAt: now })
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['VLC 설치 페이지 열기', '취소'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'VLC 설치 필요',
+    message: 'WaterMedia 사용을 위해 VLC가 필요합니다.',
+    detail:
+      'VLC를 설치하면 런처가 다음 실행부터 경로를 자동으로 감지합니다. 설치 후 런처에서 다시 게임을 실행해주세요.'
+  })
+
+  if (result.response === 0) {
     shell.openExternal(VLC_DOWNLOAD_URL)
   }
 
