@@ -22,6 +22,41 @@ const DEFAULT_SERVER_PORT = 25565
 const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
 const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
 
+function resolveArgumentValue(value, replacements) {
+  if (typeof value !== 'string') return null
+  return Object.entries(replacements).reduce(
+    (current, [key, replacement]) => current.replaceAll(`\${${key}}`, replacement),
+    value
+  )
+}
+
+function collectArgumentValues(argument, replacements) {
+  if (typeof argument === 'string') {
+    const resolved = resolveArgumentValue(argument, replacements)
+    return resolved ? [resolved] : []
+  }
+
+  if (!argument || typeof argument !== 'object') return []
+  const value = argument.value
+  const values = Array.isArray(value) ? value : [value]
+  return values.map((entry) => resolveArgumentValue(entry, replacements)).filter(Boolean)
+}
+
+function resolveForgeJvmArgs(root, versionId) {
+  const versionJsonPath = path.join(root, 'versions', versionId, `${versionId}.json`)
+  const versionJson = readJsonSafe(versionJsonPath, null)
+  const replacements = {
+    library_directory: path.join(root, 'libraries'),
+    classpath_separator: path.delimiter,
+    version_name: versionId
+  }
+  const forgeArgs = (versionJson?.arguments?.jvm || []).flatMap((argument) =>
+    collectArgumentValues(argument, replacements)
+  )
+
+  return [...forgeArgs, ...FORGE_JVM_ARGS]
+}
+
 function getDefaultLaunchDirectory() {
   return path.join(app.getPath('appData'), 'ByteMC Launcher')
 }
@@ -1190,7 +1225,7 @@ export function setupLauncher(mainWindow) {
           custom: versionId
         },
         memory: memoryConfig,
-        customArgs: loader === 'forge' ? FORGE_JVM_ARGS : undefined,
+        customArgs: loader === 'forge' ? resolveForgeJvmArgs(root, versionId) : undefined,
         quickPlay:
           serverConfig.quickConnect && settings?.autoConnect !== false
             ? {
