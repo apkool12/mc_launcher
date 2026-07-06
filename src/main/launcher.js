@@ -1314,6 +1314,11 @@ export function setupLauncher(mainWindow) {
       const serverAddress = formatServerAddress(serverConfig)
       applyMinecraftOptions(root, settings)
       const waterMediaVlc = await ensureWaterMediaVlc({ root, mainWindow })
+      if (waterMediaVlc.required && !waterMediaVlc.found) {
+        throw new Error(
+          'WaterMedia 사용을 위해 VLC 설치가 필요합니다. VLC 설치 후 다시 실행해주세요.'
+        )
+      }
       await repairVersionClasspath({ root, mcVersion, versionId, mainWindow })
 
       mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
