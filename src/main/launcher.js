@@ -1,6 +1,6 @@
 import { Client } from 'minecraft-launcher-core'
 import { Auth } from 'msmc'
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, shell } from 'electron'
 import path from 'path'
 import * as xmclInstaller from '@xmcl/installer'
 import fs from 'fs'
@@ -20,6 +20,7 @@ const DEFAULT_FORGE_VERSION = '47.4.0'
 const DEFAULT_SERVER_HOST = 'localhost'
 const DEFAULT_SERVER_PORT = 25565
 const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
+const VLC_DOWNLOAD_URL = 'https://www.videolan.org/vlc/'
 const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
 
 function resolveArgumentValue(value, replacements) {
@@ -55,6 +56,108 @@ function resolveForgeJvmArgs(root, versionId) {
   )
 
   return [...forgeArgs, ...FORGE_JVM_ARGS]
+}
+
+function hasWaterMedia(root) {
+  const modsDir = path.join(root, 'mods')
+  try {
+    if (!fs.existsSync(modsDir) || !fs.statSync(modsDir).isDirectory()) return false
+    return fs.readdirSync(modsDir).some((name) => /^watermedia.*\.jar$/i.test(name))
+  } catch {
+    return false
+  }
+}
+
+function hasVlcLibrary(dirPath) {
+  try {
+    if (!dirPath || !fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return false
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+    const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
+    if (process.platform === 'win32') {
+      return fileNames.includes('libvlc.dll') && fileNames.includes('libvlccore.dll')
+    }
+    if (process.platform === 'darwin') {
+      return (
+        fileNames.includes('libvlc.dylib') ||
+        fileNames.includes('libvlccore.dylib') ||
+        fileNames.includes('VLC')
+      )
+    }
+    return fileNames.includes('libvlc.so') || fileNames.some((name) => /^libvlc\.so\./.test(name))
+  } catch {
+    return false
+  }
+}
+
+function getVlcCandidates() {
+  if (process.platform === 'darwin') {
+    return [
+      '/Applications/VLC.app/Contents/Frameworks',
+      '/Applications/VLC.app/Contents/MacOS',
+      '/Applications/VLC.app/Contents/MacOS/lib',
+      path.join(app.getPath('home'), 'Applications', 'VLC.app', 'Contents', 'Frameworks'),
+      path.join(app.getPath('home'), 'Applications', 'VLC.app', 'Contents', 'MacOS'),
+      path.join(app.getPath('home'), 'Applications', 'VLC.app', 'Contents', 'MacOS', 'lib')
+    ]
+  }
+
+  if (process.platform === 'win32') {
+    return [
+      'C:\\Program Files\\VideoLAN\\VLC',
+      'C:\\Program Files (x86)\\VideoLAN\\VLC',
+      path.join(app.getPath('home'), 'AppData', 'Local', 'Programs', 'VideoLAN', 'VLC')
+    ]
+  }
+
+  return [
+    '/usr/lib/vlc',
+    '/usr/lib/x86_64-linux-gnu',
+    '/usr/local/lib',
+    '/snap/vlc/current/usr/lib'
+  ]
+}
+
+function findVlcDiscoveryPath() {
+  const configuredPath = String(process.env.VLC_DISCOVERY_PATH || '').trim()
+  const candidates = [configuredPath, ...getVlcCandidates()].filter(Boolean)
+  return candidates.find((candidate) => hasVlcLibrary(candidate)) || null
+}
+
+function writeWaterMediaVlcPath(root, vlcPath) {
+  const watermediaDir = path.join(root, 'config', 'watermedia')
+  fs.mkdirSync(watermediaDir, { recursive: true })
+  fs.writeFileSync(path.join(watermediaDir, 'custom_vlc_path.txt'), `${vlcPath}\n`, 'utf-8')
+}
+
+async function ensureWaterMediaVlc({ root, mainWindow }) {
+  if (!hasWaterMedia(root)) return { jvmArgs: [], found: false, required: false }
+
+  const vlcPath = findVlcDiscoveryPath()
+  if (vlcPath) {
+    writeWaterMediaVlcPath(root, vlcPath)
+    mainWindow.webContents.send('status-update', 'WaterMedia VLC 경로 자동 설정 완료')
+    return {
+      jvmArgs: [`-Dvlc4j.userDiscoveryPath=${encodeURIComponent(vlcPath)}`],
+      found: true,
+      required: true,
+      path: vlcPath
+    }
+  }
+
+  const statePath = path.join(root, STATE_FILE)
+  const state = readJsonSafe(statePath, {})
+  const now = Date.now()
+  const promptedAt = Number(state.vlcDownloadPromptedAt || 0)
+  if (!promptedAt || now - promptedAt > 24 * 60 * 60 * 1000) {
+    writeJsonSafe(statePath, { ...state, vlcDownloadPromptedAt: now })
+    shell.openExternal(VLC_DOWNLOAD_URL)
+  }
+
+  mainWindow.webContents.send(
+    'status-update',
+    'WaterMedia 사용을 위해 VLC 설치가 필요합니다. 설치 후 런처를 다시 실행해주세요.'
+  )
+  return { jvmArgs: [], found: false, required: true }
 }
 
 function getDefaultLaunchDirectory() {
@@ -1210,6 +1313,7 @@ export function setupLauncher(mainWindow) {
       })
       const serverAddress = formatServerAddress(serverConfig)
       applyMinecraftOptions(root, settings)
+      const waterMediaVlc = await ensureWaterMediaVlc({ root, mainWindow })
       await repairVersionClasspath({ root, mcVersion, versionId, mainWindow })
 
       mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
@@ -1225,7 +1329,10 @@ export function setupLauncher(mainWindow) {
           custom: versionId
         },
         memory: memoryConfig,
-        customArgs: loader === 'forge' ? resolveForgeJvmArgs(root, versionId) : undefined,
+        customArgs:
+          loader === 'forge'
+            ? [...resolveForgeJvmArgs(root, versionId), ...waterMediaVlc.jvmArgs]
+            : waterMediaVlc.jvmArgs,
         quickPlay:
           serverConfig.quickConnect && settings?.autoConnect !== false
             ? {
