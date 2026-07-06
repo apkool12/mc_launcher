@@ -209,6 +209,36 @@ function normalizeForgeVersion(mcVersion, forgeVersion) {
   return `${mcVersion}-${rawVersion}`
 }
 
+async function ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow }) {
+  const versionJsonPath = path.join(root, 'versions', mcVersion, `${mcVersion}.json`)
+  const versionJarPath = path.join(root, 'versions', mcVersion, `${mcVersion}.jar`)
+
+  if (existsFile(versionJsonPath) && existsFile(versionJarPath)) {
+    return
+  }
+
+  if (
+    typeof xmclInstaller.getVersionList !== 'function' ||
+    typeof xmclInstaller.install !== 'function'
+  ) {
+    throw new Error(
+      '@xmcl/installer에서 Minecraft 설치 API를 찾을 수 없습니다. 패키지를 최신 상태로 설치해주세요.'
+    )
+  }
+
+  mainWindow.webContents.send('status-update', `Minecraft ${mcVersion} 설치 중...`)
+  emitInstallProgress(mainWindow, 8, `Minecraft ${mcVersion} 설치 중...`, 'MINECRAFT')
+
+  const versionList = await xmclInstaller.getVersionList()
+  const versionMeta = versionList?.versions?.find((version) => version.id === mcVersion)
+  if (!versionMeta) {
+    throw new Error(`Minecraft ${mcVersion} 버전 정보를 찾을 수 없습니다.`)
+  }
+
+  await xmclInstaller.install(versionMeta, root)
+  emitInstallProgress(mainWindow, 12, `Minecraft ${mcVersion} 설치 완료`, 'MINECRAFT')
+}
+
 async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow }) {
   if (typeof xmclInstaller.installForge !== 'function') {
     throw new Error(
@@ -229,6 +259,8 @@ async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow
       return cachedVersionId
     }
   }
+
+  await ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow })
 
   mainWindow.webContents.send('status-update', `Forge ${targetForge} 설치 중...`)
   emitInstallProgress(mainWindow, 10, `Forge ${targetForge} 설치 중...`, 'FORGE')
