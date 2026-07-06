@@ -18,6 +18,10 @@ const DEFAULT_LAUNCHER_SETTINGS = {
 }
 let launchPathIpcRegistered = false
 
+function getDefaultLaunchDirectory() {
+  return join(app.getPath('appData'), 'ByteMC Launcher')
+}
+
 function getConfigPath() {
   return join(app.getPath('userData'), LAUNCHER_CONFIG_FILE)
 }
@@ -59,6 +63,10 @@ function normalizeLauncherSettings(config) {
   return {
     ...DEFAULT_LAUNCHER_SETTINGS,
     ...config,
+    launchDirectory:
+      config.launchDirectory && !isWindowsDriveRoot(config.launchDirectory)
+        ? config.launchDirectory
+        : getDefaultLaunchDirectory(),
     memoryMinGb,
     memoryMaxGb,
     autoConnect: config.autoConnect !== false,
@@ -118,10 +126,9 @@ function registerLaunchPathIpc(mainWindow) {
 
   ipcMain.handle('get-launch-directory', async () => {
     const config = readLauncherConfig()
-    const launchDirectory = config.launchDirectory
-    if (!launchDirectory) return null
+    const launchDirectory = config.launchDirectory || getDefaultLaunchDirectory()
     if (isWindowsDriveRoot(launchDirectory)) {
-      return null
+      return getDefaultLaunchDirectory()
     }
     return launchDirectory
   })
@@ -151,7 +158,7 @@ function registerLaunchPathIpc(mainWindow) {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '마인크래프트 설치 위치 선택',
       properties: ['openDirectory', 'createDirectory'],
-      defaultPath: config.launchDirectory || app.getPath('documents')
+      defaultPath: config.launchDirectory || getDefaultLaunchDirectory()
     })
 
     if (result.canceled || result.filePaths.length === 0) {

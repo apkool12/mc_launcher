@@ -190,6 +190,14 @@ function closeSettingsPanel() {
 async function ensureLaunchDirectorySelected() {
   if (launchDirectory) return true
 
+  const defaultDirectory = await window.api.getLaunchDirectory()
+  if (defaultDirectory) {
+    launchDirectory = defaultDirectory
+    launcherSettings = { ...launcherSettings, launchDirectory }
+    renderSettings(launcherSettings)
+    return true
+  }
+
   const result = await window.api.chooseLaunchDirectory()
   if (!result || result.canceled) {
     await showModal({

@@ -139,6 +139,12 @@ SERVER_HOST=bytemc.kro.kr
 SERVER_PORT=25565
 ```
 
+기본 설치 위치는 OS별 앱 데이터 폴더 아래에 자동 생성됩니다.
+
+- macOS: `~/Library/Application Support/ByteMC Launcher`
+- Windows: `%APPDATA%\\ByteMC Launcher`
+- Linux: `~/.config/ByteMC Launcher`
+
 ### 4-1) 서버 잔액/계절 API
 
 런처는 manifest의 `economy.balanceApiUrl` 또는 `BALANCE_API_URL` 환경변수로 Numismatics 잔액 API를 호출합니다.

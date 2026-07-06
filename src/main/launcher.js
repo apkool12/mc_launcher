@@ -20,6 +20,10 @@ const DEFAULT_SERVER_HOST = 'localhost'
 const DEFAULT_SERVER_PORT = 25565
 const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
 
+function getDefaultLaunchDirectory() {
+  return path.join(app.getPath('appData'), 'ByteMC Launcher')
+}
+
 function emitInstallProgress(mainWindow, percent, message, stage = 'PREPARE') {
   const safePercent = Math.max(0, Math.min(100, Math.round(percent)))
   mainWindow.webContents.send('install-progress', {
@@ -824,13 +828,7 @@ export function setupLauncher(mainWindow) {
   ipcMain.handle('launch-game', async (event, { mclcAuth, launchRoot, settings }) => {
     try {
       emitInstallProgress(mainWindow, 1, '런처 준비 중...', 'PREPARE')
-      const defaultRoot = path.join(
-        process.env.APPDATA ||
-          (process.platform === 'darwin'
-            ? path.join(process.env.HOME, 'Library/Application Support')
-            : process.env.HOME),
-        'mc-launcher-eunsik'
-      )
+      const defaultRoot = getDefaultLaunchDirectory()
       const root = launchRoot || defaultRoot
 
       if (!fs.existsSync(root)) {
