@@ -224,6 +224,96 @@ function existsFile(filePath) {
   }
 }
 
+function isValidZipFile(filePath) {
+  try {
+    new AdmZip(filePath).getEntries()
+    return true
+  } catch {
+    return false
+  }
+}
+
+function getMavenArtifactPath(root, descriptor) {
+  const [group, artifact, version, classifier] = String(descriptor || '').split(':')
+  if (!group || !artifact || !version) return null
+
+  const fileName = `${artifact}-${version}${classifier ? `-${classifier}` : ''}.jar`
+  return path.join(root, 'libraries', ...group.split('.'), artifact, version, fileName)
+}
+
+function getLibraryArtifactPath(root, library) {
+  const artifactPath = library?.downloads?.artifact?.path
+  if (artifactPath) return path.join(root, 'libraries', artifactPath)
+  if (library?.name) return getMavenArtifactPath(root, library.name)
+  return null
+}
+
+function collectVersionClasspath(root, versionId, seen = new Set()) {
+  if (!versionId || seen.has(versionId)) return { jars: [], libraries: [] }
+  seen.add(versionId)
+
+  const versionJsonPath = path.join(root, 'versions', versionId, `${versionId}.json`)
+  const versionJson = readJsonSafe(versionJsonPath, null)
+  if (!versionJson) return { jars: [], libraries: [] }
+
+  const ownLibraries = Array.isArray(versionJson.libraries) ? versionJson.libraries : []
+  const parent = versionJson.inheritsFrom
+    ? collectVersionClasspath(root, versionJson.inheritsFrom, seen)
+    : { jars: [], libraries: [] }
+
+  return {
+    jars: [path.join(root, 'versions', versionId, `${versionId}.jar`), ...parent.jars],
+    libraries: [...ownLibraries, ...parent.libraries]
+  }
+}
+
+async function installVersionLibraries({ root, versionId, mainWindow }) {
+  if (typeof xmclInstaller.installLibraries !== 'function') return
+
+  const { libraries } = collectVersionClasspath(root, versionId)
+  if (libraries.length === 0) return
+
+  mainWindow.webContents.send('status-update', '손상된 라이브러리 복구 중...')
+  emitInstallProgress(mainWindow, 21, '손상된 라이브러리 복구 중...', 'MINECRAFT')
+  await xmclInstaller.installLibraries({
+    libraries,
+    minecraftDirectory: root
+  })
+}
+
+async function repairVersionClasspath({ root, mcVersion, versionId, mainWindow }) {
+  const { jars, libraries } = collectVersionClasspath(root, versionId)
+  const candidates = [
+    ...jars,
+    ...libraries.map((library) => getLibraryArtifactPath(root, library)).filter(Boolean)
+  ]
+  const corruptFiles = []
+
+  for (const candidate of new Set(candidates)) {
+    if (!existsFile(candidate)) continue
+    if (isValidZipFile(candidate)) continue
+
+    corruptFiles.push(candidate)
+    fs.rmSync(candidate, { force: true })
+  }
+
+  if (corruptFiles.length === 0) return
+
+  mainWindow.webContents.send(
+    'status-update',
+    `손상된 Minecraft 파일 ${corruptFiles.length}개 재설치 중...`
+  )
+  emitInstallProgress(
+    mainWindow,
+    20,
+    `손상된 Minecraft 파일 ${corruptFiles.length}개 재설치 중...`,
+    'MINECRAFT'
+  )
+
+  await ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow })
+  await installVersionLibraries({ root, versionId, mainWindow })
+}
+
 function getModpackReadyPath(root) {
   return path.join(root, MODPACK_READY_FILE)
 }
@@ -343,8 +433,12 @@ async function ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow }) 
   const versionJsonPath = path.join(root, 'versions', mcVersion, `${mcVersion}.json`)
   const versionJarPath = path.join(root, 'versions', mcVersion, `${mcVersion}.jar`)
 
-  if (existsFile(versionJsonPath) && existsFile(versionJarPath)) {
+  if (existsFile(versionJsonPath) && existsFile(versionJarPath) && isValidZipFile(versionJarPath)) {
     return
+  }
+
+  if (existsFile(versionJarPath) && !isValidZipFile(versionJarPath)) {
+    fs.rmSync(versionJarPath, { force: true })
   }
 
   if (typeof xmclInstaller.getVersionList !== 'function') {
@@ -417,7 +511,12 @@ async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow
 
   if (cachedVersionId && state.forgeVersion === targetForge) {
     const versionJsonPath = path.join(root, 'versions', cachedVersionId, `${cachedVersionId}.json`)
-    if (existsFile(versionJsonPath)) {
+    const versionJarPath = path.join(root, 'versions', cachedVersionId, `${cachedVersionId}.jar`)
+    if (
+      existsFile(versionJsonPath) &&
+      existsFile(versionJarPath) &&
+      isValidZipFile(versionJarPath)
+    ) {
       mainWindow.webContents.send('status-update', `Forge 캐시 사용: ${cachedVersionId}`)
       emitInstallProgress(mainWindow, 20, `Forge 캐시 사용: ${cachedVersionId}`, 'FORGE')
       return cachedVersionId
@@ -1048,6 +1147,7 @@ export function setupLauncher(mainWindow) {
       })
       const serverAddress = formatServerAddress(serverConfig)
       applyMinecraftOptions(root, settings)
+      await repairVersionClasspath({ root, mcVersion, versionId, mainWindow })
 
       mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
       emitInstallProgress(mainWindow, 100, '설치 준비 완료, 게임 시작', 'LAUNCH')
