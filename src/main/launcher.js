@@ -971,6 +971,7 @@ async function syncZipPackage({ root, mainWindow, manifest, statePath, state, ta
     String(ready.url || '') === String(pack.url)
 
   const legacyZipCached =
+    !expectedZipSha &&
     state.modpackVersion === targetVersion &&
     (state.modpackMode === 'zip' || !state.modpackMode) &&
     hasJarMods(root)
