@@ -9,8 +9,8 @@ const userName = document.getElementById('user-name')
 const userAvatar = document.getElementById('user-avatar')
 const userStatus = document.getElementById('user-status')
 const playerSummary = document.getElementById('player-summary')
-const summaryBadges = document.getElementById('summary-badges')
-const summaryOwned = document.getElementById('summary-owned')
+const summaryBalance = document.getElementById('summary-balance')
+const summarySeason = document.getElementById('summary-season')
 const progressContainer = document.getElementById('progress-container')
 const progressFill = document.getElementById('progress-fill')
 const statusText = document.getElementById('status-text')
@@ -23,10 +23,31 @@ const modalCard = document.getElementById('modal-card')
 const modalTitle = document.getElementById('modal-title')
 const modalMessage = document.getElementById('modal-message')
 const modalOk = document.getElementById('modal-ok')
+const settingsOverlay = document.getElementById('settings-overlay')
+const settingsClose = document.getElementById('settings-close')
+const settingsCancel = document.getElementById('settings-cancel')
+const settingsSave = document.getElementById('settings-save')
+const settingsBrowse = document.getElementById('settings-browse')
+const settingsPath = document.getElementById('settings-path')
+const settingsServer = document.getElementById('settings-server')
+const ramMin = document.getElementById('ram-min')
+const ramMax = document.getElementById('ram-max')
+const autoConnect = document.getElementById('auto-connect')
+const masterVolume = document.getElementById('master-volume')
+const musicVolume = document.getElementById('music-volume')
+const masterVolumeValue = document.getElementById('master-volume-value')
+const musicVolumeValue = document.getElementById('music-volume-value')
 
 let mclcAuth = null
 let launchDirectory = null
 let modalResolver = null
+let launcherSettings = {
+  memoryMinGb: 2,
+  memoryMaxGb: 4,
+  autoConnect: true,
+  masterVolume: 100,
+  musicVolume: 30
+}
 
 function showModal({ title = '알림', message = '', variant = 'info' }) {
   return new Promise((resolve) => {
@@ -64,6 +85,11 @@ modalOverlay.addEventListener('click', (event) => {
 })
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) {
+    closeSettingsPanel()
+    return
+  }
+
   if (event.key === 'Escape' && !modalOverlay.classList.contains('hidden')) {
     hideModal()
   }
@@ -76,16 +102,89 @@ function init() {
   progressFill.style.width = '0%'
   progressPercent.textContent = '0%'
   progressStage.textContent = 'PREPARE'
-  hydrateLaunchDirectory()
+  hydrateLauncherSettings()
+  restoreLogin()
 }
 
-async function hydrateLaunchDirectory() {
-  try {
-    const selectedPath = await window.api.getLaunchDirectory()
-    launchDirectory = selectedPath || null
-  } catch (error) {
-    console.error('Failed to load launch directory', error)
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(min, Math.min(max, number))
+}
+
+function formatServer(server) {
+  if (!server?.host) return 'bytemc.kro.kr:25565'
+  if (!server.port || Number(server.port) === 25565) return server.host
+  return `${server.host}:${server.port}`
+}
+
+function renderSettings(settings = launcherSettings, server) {
+  launcherSettings = {
+    ...launcherSettings,
+    ...settings,
+    memoryMinGb: clampNumber(settings.memoryMinGb, 1, 12, 2),
+    memoryMaxGb: clampNumber(settings.memoryMaxGb, 2, 16, 4),
+    autoConnect: settings.autoConnect !== false,
+    masterVolume: clampNumber(settings.masterVolume, 0, 100, 100),
+    musicVolume: clampNumber(settings.musicVolume, 0, 100, 30)
   }
+
+  if (launcherSettings.memoryMaxGb < launcherSettings.memoryMinGb) {
+    launcherSettings.memoryMaxGb = launcherSettings.memoryMinGb
+  }
+
+  launchDirectory = launcherSettings.launchDirectory || launchDirectory || null
+  settingsPath.textContent = launchDirectory || '선택되지 않음'
+  settingsServer.textContent = formatServer(server)
+  ramMin.value = String(launcherSettings.memoryMinGb)
+  ramMax.value = String(launcherSettings.memoryMaxGb)
+  autoConnect.checked = launcherSettings.autoConnect
+  masterVolume.value = String(launcherSettings.masterVolume)
+  musicVolume.value = String(launcherSettings.musicVolume)
+  masterVolumeValue.textContent = `${launcherSettings.masterVolume}%`
+  musicVolumeValue.textContent = `${launcherSettings.musicVolume}%`
+}
+
+function readSettingsForm() {
+  const memoryMinGb = clampNumber(ramMin.value, 1, 12, 2)
+  const memoryMaxGb = Math.max(memoryMinGb, clampNumber(ramMax.value, 2, 16, 4))
+
+  return {
+    ...launcherSettings,
+    launchDirectory,
+    memoryMinGb,
+    memoryMaxGb,
+    autoConnect: autoConnect.checked,
+    masterVolume: clampNumber(masterVolume.value, 0, 100, 100),
+    musicVolume: clampNumber(musicVolume.value, 0, 100, 30)
+  }
+}
+
+async function hydrateLauncherSettings() {
+  try {
+    const result = await window.api.getLauncherSettings()
+    if (result?.success) {
+      renderSettings(result.settings, result.server)
+      return
+    }
+
+    const selectedPath = await window.api.getLaunchDirectory()
+    renderSettings({ ...launcherSettings, launchDirectory: selectedPath || null })
+  } catch (error) {
+    console.error('Failed to load launcher settings', error)
+  }
+}
+
+function openSettingsPanel() {
+  renderSettings(readSettingsForm())
+  settingsOverlay.classList.remove('hidden')
+  settingsOverlay.setAttribute('aria-hidden', 'false')
+  settingsSave.focus()
+}
+
+function closeSettingsPanel() {
+  settingsOverlay.classList.add('hidden')
+  settingsOverlay.setAttribute('aria-hidden', 'true')
 }
 
 async function ensureLaunchDirectorySelected() {
@@ -110,6 +209,8 @@ async function ensureLaunchDirectorySelected() {
   }
 
   launchDirectory = result.launchDirectory
+  launcherSettings = { ...launcherSettings, launchDirectory }
+  await window.api.saveLauncherSettings(launcherSettings)
   await showModal({
     title: '설치 위치 설정 완료',
     message: `설치 위치가 설정되었습니다:\n${launchDirectory}`,
@@ -121,9 +222,10 @@ async function ensureLaunchDirectorySelected() {
 async function updatePlayerSummary(profile) {
   if (!profile) return
 
-  summaryBadges.textContent = '배지: -'
-  summaryOwned.textContent = '도감 보유종: -'
-  playerSummary.classList.add('hidden')
+  userStatus.textContent = '여행 준비 완료'
+  summaryBalance.textContent = '확인 중'
+  summarySeason.textContent = '확인 중'
+  playerSummary.classList.remove('hidden')
 
   try {
     const summary = await window.api.getPlayerSummary({
@@ -131,33 +233,79 @@ async function updatePlayerSummary(profile) {
       nickname: profile.name
     })
 
-    if (!summary || !summary.enabled) return
+    if (!summary || !summary.enabled) {
+      userStatus.textContent = '여행 준비 완료'
+      summaryBalance.textContent = '조회 불가'
+      summarySeason.textContent = '조회 불가'
+      return
+    }
 
-    summaryBadges.textContent = `배지: ${summary.badgesCount}`
-    summaryOwned.textContent = `도감 보유종: ${summary.ownedSpeciesCount}`
+    if (Number.isFinite(Number(summary.balance))) {
+      const formattedBalance = Number(summary.balance).toLocaleString('ko-KR')
+      userStatus.textContent = '여행 준비 완료'
+      summaryBalance.textContent = formattedBalance
+    } else {
+      userStatus.textContent = '여행 준비 완료'
+      summaryBalance.textContent = '조회 불가'
+    }
+
+    if (summary.season?.label) {
+      const day = Number(summary.season.day)
+      summarySeason.textContent = Number.isFinite(day)
+        ? `${summary.season.label} ${day}일차`
+        : summary.season.label
+    } else {
+      summarySeason.textContent = '조회 불가'
+    }
+
     playerSummary.classList.remove('hidden')
   } catch (error) {
     console.error('Failed to load player summary', error)
+    userStatus.textContent = '여행 준비 완료'
+    summaryBalance.textContent = '조회 실패'
+    summarySeason.textContent = '조회 실패'
   }
+}
+
+function applyLoginState(result) {
+  mclcAuth = result.mclcAuth
+  userName.textContent = result.profile.name
+  userAvatar.src = `https://minotar.net/helm/${result.profile.name}/64`
+  userStatus.textContent = '여행 준비 완료'
+
+  btnLogin.classList.add('hidden')
+  btnPlay.classList.remove('hidden')
+  userArea.classList.remove('hidden')
+  updatePlayerSummary(result.profile)
+}
+
+async function restoreLogin() {
+  btnLogin.disabled = true
+  btnLogin.querySelector('span').textContent = '확인 중...'
+
+  try {
+    const result = await window.api.restoreLogin()
+    if (result?.success) {
+      applyLoginState(result)
+      return
+    }
+  } catch (error) {
+    console.error('Failed to restore login', error)
+  }
+
+  btnLogin.disabled = false
+  btnLogin.querySelector('span').textContent = 'LOGIN'
 }
 
 // ===== Login =====
 btnLogin.addEventListener('click', async () => {
   btnLogin.disabled = true
   btnLogin.querySelector('span').textContent = '인증 중...'
-  
+
   const result = await window.api.msLogin()
-  
+
   if (result.success) {
-    mclcAuth = result.mclcAuth
-    userName.textContent = result.profile.name
-    userAvatar.src = `https://minotar.net/helm/${result.profile.name}/64`
-    
-    // Switch to play mode
-    btnLogin.classList.add('hidden')
-    btnPlay.classList.remove('hidden')
-    userArea.classList.remove('hidden')
-    updatePlayerSummary(result.profile)
+    applyLoginState(result)
   } else {
     await showModal({
       title: '로그인 실패',
@@ -175,13 +323,17 @@ btnPlay.addEventListener('click', async () => {
 
   const hasLaunchDirectory = await ensureLaunchDirectorySelected()
   if (!hasLaunchDirectory) return
-  
+
   btnPlay.disabled = true
   btnPlay.querySelector('span').textContent = '모험 준비 중...'
   progressContainer.classList.remove('hidden')
-  
-  const result = await window.api.launchGame({ mclcAuth, launchRoot: launchDirectory })
-  
+
+  const result = await window.api.launchGame({
+    mclcAuth,
+    launchRoot: launchDirectory,
+    settings: readSettingsForm()
+  })
+
   if (!result.success) {
     await showModal({
       title: '실행 실패',
@@ -196,35 +348,65 @@ btnPlay.addEventListener('click', async () => {
 
 // ===== Navigation =====
 btnSettings.addEventListener('click', () => {
-  window.api
-    .chooseLaunchDirectory()
-    .then((result) => {
-      if (!result || result.canceled) return
-      if (!result.success) {
-        void showModal({
-          title: '설치 위치 오류',
-          message: result.error || '설치 위치 선택에 실패했습니다.',
-          variant: 'error'
-        })
-        return
-      }
-      if (result.success) {
-        launchDirectory = result.launchDirectory
-        void showModal({
-          title: '설치 위치 변경 완료',
-          message: `설치 위치가 변경되었습니다:\n${launchDirectory}`,
-          variant: 'success'
-        })
-      }
+  openSettingsPanel()
+})
+
+settingsClose.addEventListener('click', closeSettingsPanel)
+settingsCancel.addEventListener('click', closeSettingsPanel)
+
+settingsOverlay.addEventListener('click', (event) => {
+  if (event.target === settingsOverlay) closeSettingsPanel()
+})
+
+settingsBrowse.addEventListener('click', async () => {
+  const result = await window.api.chooseLaunchDirectory()
+  if (!result || result.canceled) return
+  if (!result.success) {
+    await showModal({
+      title: '설치 위치 오류',
+      message: result.error || '설치 위치 선택에 실패했습니다.',
+      variant: 'error'
     })
-    .catch((error) => {
-      console.error('Failed to choose launch directory', error)
-      void showModal({
-        title: '설치 위치 오류',
-        message: '설치 위치 변경에 실패했습니다.',
-        variant: 'error'
-      })
+    return
+  }
+
+  launchDirectory = result.launchDirectory
+  settingsPath.textContent = launchDirectory
+})
+
+ramMin.addEventListener('input', () => {
+  const min = clampNumber(ramMin.value, 1, 12, 2)
+  const max = clampNumber(ramMax.value, 2, 16, 4)
+  if (max < min) ramMax.value = String(min)
+})
+
+masterVolume.addEventListener('input', () => {
+  masterVolumeValue.textContent = `${masterVolume.value}%`
+})
+
+musicVolume.addEventListener('input', () => {
+  musicVolumeValue.textContent = `${musicVolume.value}%`
+})
+
+settingsSave.addEventListener('click', async () => {
+  const nextSettings = readSettingsForm()
+  const result = await window.api.saveLauncherSettings(nextSettings)
+  if (!result?.success) {
+    await showModal({
+      title: '저장 실패',
+      message: result?.error || '환경설정을 저장하지 못했습니다.',
+      variant: 'error'
     })
+    return
+  }
+
+  renderSettings(result.settings, result.server)
+  closeSettingsPanel()
+  await showModal({
+    title: '환경설정 저장 완료',
+    message: '다음 실행부터 변경한 설정이 적용됩니다.',
+    variant: 'success'
+  })
 })
 
 btnGuide.addEventListener('click', () => {

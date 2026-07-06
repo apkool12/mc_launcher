@@ -7,6 +7,15 @@ import net from 'net'
 import fs from 'fs'
 
 const LAUNCHER_CONFIG_FILE = 'launcher-config.json'
+const DEFAULT_SERVER_HOST = 'localhost'
+const DEFAULT_SERVER_PORT = 25565
+const DEFAULT_LAUNCHER_SETTINGS = {
+  memoryMinGb: 2,
+  memoryMaxGb: 4,
+  autoConnect: true,
+  masterVolume: 100,
+  musicVolume: 30
+}
 let launchPathIpcRegistered = false
 
 function getConfigPath() {
@@ -26,6 +35,75 @@ function readLauncherConfig() {
 function writeLauncherConfig(nextConfig) {
   const configPath = getConfigPath()
   fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2), 'utf-8')
+}
+
+function normalizeLauncherSettings(config) {
+  const rawMemoryMin = Number(config.memoryMinGb)
+  const rawMemoryMax = Number(config.memoryMaxGb)
+  const rawMasterVolume = Number(config.masterVolume)
+  const rawMusicVolume = Number(config.musicVolume)
+  const memoryMinGb = Math.max(1, Math.min(12, Number.isFinite(rawMemoryMin) ? rawMemoryMin : 2))
+  const memoryMaxGb = Math.max(
+    memoryMinGb,
+    Math.min(16, Number.isFinite(rawMemoryMax) ? rawMemoryMax : 4)
+  )
+  const masterVolume = Math.max(
+    0,
+    Math.min(100, Number.isFinite(rawMasterVolume) ? rawMasterVolume : 100)
+  )
+  const musicVolume = Math.max(
+    0,
+    Math.min(100, Number.isFinite(rawMusicVolume) ? rawMusicVolume : 30)
+  )
+
+  return {
+    ...DEFAULT_LAUNCHER_SETTINGS,
+    ...config,
+    memoryMinGb,
+    memoryMaxGb,
+    autoConnect: config.autoConnect !== false,
+    masterVolume,
+    musicVolume
+  }
+}
+
+function readJsonSafe(filePath, fallback) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return fallback
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch {
+    return fallback
+  }
+}
+
+function readBundledManifest() {
+  const candidates = [
+    process.env.MODPACK_MANIFEST_FILE,
+    join(process.cwd(), 'resources', 'modpack-manifest.json'),
+    join(process.resourcesPath || '', 'resources', 'modpack-manifest.json'),
+    join(process.resourcesPath || '', 'modpack-manifest.json')
+  ].filter(Boolean)
+
+  for (const filePath of candidates) {
+    const manifest = readJsonSafe(filePath, null)
+    if (manifest) return manifest
+  }
+
+  return null
+}
+
+function getServerConfig() {
+  const manifest = readBundledManifest()
+  const server = manifest?.server || {}
+  const host = String(
+    process.env.SERVER_HOST || server.host || server.address || DEFAULT_SERVER_HOST
+  ).trim()
+  const port = Number(process.env.SERVER_PORT || server.port || DEFAULT_SERVER_PORT)
+
+  return {
+    host,
+    port: Number.isFinite(port) ? port : DEFAULT_SERVER_PORT
+  }
 }
 
 function isWindowsDriveRoot(dirPath) {
@@ -48,6 +126,26 @@ function registerLaunchPathIpc(mainWindow) {
     return launchDirectory
   })
 
+  ipcMain.handle('get-launcher-settings', async () => {
+    const config = readLauncherConfig()
+    return {
+      success: true,
+      settings: normalizeLauncherSettings(config),
+      server: getServerConfig()
+    }
+  })
+
+  ipcMain.handle('save-launcher-settings', async (_, settings) => {
+    const config = readLauncherConfig()
+    const nextConfig = normalizeLauncherSettings({ ...config, ...(settings || {}) })
+    writeLauncherConfig(nextConfig)
+    return {
+      success: true,
+      settings: nextConfig,
+      server: getServerConfig()
+    }
+  })
+
   ipcMain.handle('choose-launch-directory', async () => {
     const config = readLauncherConfig()
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -64,7 +162,8 @@ function registerLaunchPathIpc(mainWindow) {
     if (isWindowsDriveRoot(launchDirectory)) {
       return {
         success: false,
-        error: '드라이브 루트(E:\\ 같은 폴더)는 설치 위치로 선택할 수 없습니다. 하위 폴더를 선택해주세요.'
+        error:
+          '드라이브 루트(E:\\ 같은 폴더)는 설치 위치로 선택할 수 없습니다. 하위 폴더를 선택해주세요.'
       }
     }
     writeLauncherConfig({ ...config, launchDirectory })
@@ -108,6 +207,7 @@ function createWindow() {
 
 // ===== Server Status Check Logic =====
 function startServerStatusLoop(window) {
+  const serverConfig = getServerConfig()
   const checkStatus = () => {
     const socket = new net.Socket()
     socket.setTimeout(1000)
@@ -127,7 +227,7 @@ function startServerStatusLoop(window) {
       socket.destroy()
     })
 
-    socket.connect(25565, 'localhost')
+    socket.connect(serverConfig.port, serverConfig.host)
   }
 
   // Check every 5 seconds

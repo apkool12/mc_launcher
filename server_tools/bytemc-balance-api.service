@@ -1,0 +1,14 @@
+[Unit]
+Description=ByteMC Numismatics Balance API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/opc/minecraft
+EnvironmentFile=/home/opc/minecraft/tools/balance-api.env
+ExecStart=/usr/bin/python3 /home/opc/minecraft/tools/balance_api.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,8 +1,8 @@
 import { Client } from 'minecraft-launcher-core'
 import { Auth } from 'msmc'
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import path from 'path'
-import { installFabric, getFabricLoaders } from '@xmcl/installer'
+import * as xmclInstaller from '@xmcl/installer'
 import fs from 'fs'
 import { MongoClient } from 'mongodb'
 import crypto from 'crypto'
@@ -12,6 +12,13 @@ const launcher = new Client()
 let mongoClientPromise = null
 const STATE_FILE = '.launcher-state.json'
 const MODPACK_READY_FILE = '.modpack-ready.json'
+const AUTH_CACHE_FILE = 'minecraft-auth-cache.json'
+const DEFAULT_MC_VERSION = '1.20.1'
+const DEFAULT_LOADER = 'forge'
+const DEFAULT_FORGE_VERSION = '47.4.0'
+const DEFAULT_SERVER_HOST = 'localhost'
+const DEFAULT_SERVER_PORT = 25565
+const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
 
 function emitInstallProgress(mainWindow, percent, message, stage = 'PREPARE') {
   const safePercent = Math.max(0, Math.min(100, Math.round(percent)))
@@ -33,6 +40,46 @@ function readJsonSafe(filePath, fallback) {
 
 function writeJsonSafe(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+}
+
+function getAuthCachePath() {
+  return path.join(app.getPath('userData'), AUTH_CACHE_FILE)
+}
+
+function readSavedAuthToken() {
+  try {
+    const cachePath = getAuthCachePath()
+    if (!fs.existsSync(cachePath)) return null
+    const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'))
+    return typeof cache.refreshToken === 'string' ? cache.refreshToken : null
+  } catch {
+    return null
+  }
+}
+
+function writeSavedAuthToken(refreshToken, profile) {
+  const cachePath = getAuthCachePath()
+  fs.writeFileSync(
+    cachePath,
+    JSON.stringify(
+      {
+        refreshToken,
+        profile,
+        savedAt: new Date().toISOString()
+      },
+      null,
+      2
+    ),
+    { encoding: 'utf-8', mode: 0o600 }
+  )
+}
+
+function clearSavedAuthToken() {
+  try {
+    fs.rmSync(getAuthCachePath(), { force: true })
+  } catch {
+    // Ignore logout cleanup errors.
+  }
 }
 
 function existsFile(filePath) {
@@ -130,21 +177,237 @@ async function resolveFabricVersionId({ root, mcVersion, mainWindow }) {
   let targetLoader = fixedLoader
 
   if (!targetLoader) {
-    const fabricLoaders = await getFabricLoaders()
+    const fabricLoaders = await xmclInstaller.getFabricLoaders()
     targetLoader = fabricLoaders[0].version
   }
 
   mainWindow.webContents.send('status-update', `Fabric ${targetLoader} 설치 중...`)
   emitInstallProgress(mainWindow, 10, `Fabric ${targetLoader} 설치 중...`, 'FABRIC')
-  const fabricVersionId = await installFabric({
+  const fabricVersionId = await xmclInstaller.installFabric({
     minecraftVersion: mcVersion,
     version: targetLoader,
     minecraft: root
   })
 
-  writeJsonSafe(statePath, { ...state, fabricVersionId, fabricLoader: targetLoader, minecraftVersion: mcVersion })
+  writeJsonSafe(statePath, {
+    ...state,
+    fabricVersionId,
+    fabricLoader: targetLoader,
+    minecraftVersion: mcVersion
+  })
   emitInstallProgress(mainWindow, 20, `Fabric 설치 완료: ${targetLoader}`, 'FABRIC')
   return fabricVersionId
+}
+
+function normalizeForgeVersion(mcVersion, forgeVersion) {
+  const rawVersion = String(forgeVersion || DEFAULT_FORGE_VERSION).trim()
+  if (rawVersion.includes('-')) return rawVersion
+  return `${mcVersion}-${rawVersion}`
+}
+
+async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow }) {
+  if (typeof xmclInstaller.installForge !== 'function') {
+    throw new Error(
+      '@xmcl/installer에서 installForge를 찾을 수 없습니다. 패키지를 최신 상태로 설치해주세요.'
+    )
+  }
+
+  const statePath = path.join(root, STATE_FILE)
+  const state = readJsonSafe(statePath, {})
+  const targetForge = normalizeForgeVersion(mcVersion, forgeVersion)
+  const cachedVersionId = state.forgeVersionId
+
+  if (cachedVersionId && state.forgeVersion === targetForge) {
+    const versionJsonPath = path.join(root, 'versions', cachedVersionId, `${cachedVersionId}.json`)
+    if (existsFile(versionJsonPath)) {
+      mainWindow.webContents.send('status-update', `Forge 캐시 사용: ${cachedVersionId}`)
+      emitInstallProgress(mainWindow, 20, `Forge 캐시 사용: ${cachedVersionId}`, 'FORGE')
+      return cachedVersionId
+    }
+  }
+
+  mainWindow.webContents.send('status-update', `Forge ${targetForge} 설치 중...`)
+  emitInstallProgress(mainWindow, 10, `Forge ${targetForge} 설치 중...`, 'FORGE')
+
+  const [forgeMcVersion, ...forgeVersionParts] = targetForge.split('-')
+  const installResult = await xmclInstaller.installForge(
+    {
+      mcversion: forgeMcVersion || mcVersion,
+      version: forgeVersionParts.join('-') || String(forgeVersion || DEFAULT_FORGE_VERSION)
+    },
+    root
+  )
+  const forgeVersionId =
+    typeof installResult === 'string'
+      ? installResult
+      : installResult?.id ||
+        installResult?.version ||
+        `${mcVersion}-forge-${targetForge.split('-').at(-1)}`
+
+  writeJsonSafe(statePath, {
+    ...state,
+    forgeVersionId,
+    forgeVersion: targetForge,
+    minecraftVersion: mcVersion,
+    loader: 'forge'
+  })
+  emitInstallProgress(mainWindow, 20, `Forge 설치 완료: ${targetForge}`, 'FORGE')
+  return forgeVersionId
+}
+
+async function resolveLoaderVersionId({ root, gameConfig, mainWindow }) {
+  const mcVersion = String(gameConfig.minecraftVersion || DEFAULT_MC_VERSION)
+  const loader = String(gameConfig.loader || DEFAULT_LOADER).toLowerCase()
+
+  if (loader === 'vanilla' || loader === 'none') {
+    return { mcVersion, versionId: mcVersion, loader }
+  }
+
+  if (loader === 'fabric') {
+    const versionId = await resolveFabricVersionId({ root, mcVersion, mainWindow })
+    return { mcVersion, versionId, loader }
+  }
+
+  if (loader === 'forge') {
+    const versionId = await resolveForgeVersionId({
+      root,
+      mcVersion,
+      forgeVersion: gameConfig.forgeVersion || gameConfig.loaderVersion,
+      mainWindow
+    })
+    return { mcVersion, versionId, loader }
+  }
+
+  throw new Error(`지원하지 않는 로더입니다: ${loader}`)
+}
+
+function readBundledManifest() {
+  const candidates = [
+    process.env.MODPACK_MANIFEST_FILE,
+    path.join(process.cwd(), 'resources', 'modpack-manifest.json'),
+    path.join(process.resourcesPath || '', 'resources', 'modpack-manifest.json'),
+    path.join(process.resourcesPath || '', 'modpack-manifest.json')
+  ].filter(Boolean)
+
+  for (const filePath of candidates) {
+    const manifest = readJsonSafe(filePath, null)
+    if (manifest) return manifest
+  }
+
+  return null
+}
+
+async function loadModpackManifest(mainWindow) {
+  const manifestUrl = process.env.MODPACK_MANIFEST_URL
+  if (!manifestUrl) {
+    const bundledManifest = readBundledManifest()
+    if (bundledManifest) {
+      mainWindow.webContents.send('status-update', '내장 모드 매니페스트 사용')
+      return bundledManifest
+    }
+    return null
+  }
+
+  mainWindow.webContents.send('status-update', '모드 매니페스트 확인 중...')
+  emitInstallProgress(mainWindow, 22, '모드 매니페스트 확인 중...', 'MODPACK')
+  const response = await fetch(manifestUrl)
+  if (!response.ok) {
+    throw new Error(`매니페스트 요청 실패: ${response.status} ${response.statusText}`)
+  }
+  return response.json()
+}
+
+function resolveGameConfig(manifest) {
+  return {
+    minecraftVersion:
+      process.env.MINECRAFT_VERSION ||
+      manifest?.game?.minecraftVersion ||
+      manifest?.minecraftVersion ||
+      DEFAULT_MC_VERSION,
+    loader: process.env.MC_LOADER || manifest?.game?.loader || manifest?.loader || DEFAULT_LOADER,
+    loaderVersion:
+      process.env.MC_LOADER_VERSION ||
+      manifest?.game?.loaderVersion ||
+      manifest?.loaderVersion ||
+      undefined,
+    forgeVersion:
+      process.env.FORGE_VERSION ||
+      manifest?.game?.forgeVersion ||
+      manifest?.forgeVersion ||
+      DEFAULT_FORGE_VERSION
+  }
+}
+
+function resolveServerConfig(manifest) {
+  const server = manifest?.server || {}
+  const host = String(
+    process.env.SERVER_HOST || server.host || server.address || DEFAULT_SERVER_HOST
+  ).trim()
+  const port = Number(process.env.SERVER_PORT || server.port || DEFAULT_SERVER_PORT)
+  const quickConnect = server.quickConnect !== false
+
+  return {
+    host,
+    port: Number.isFinite(port) ? port : DEFAULT_SERVER_PORT,
+    quickConnect
+  }
+}
+
+function resolveMemoryConfig(manifest) {
+  return {
+    max: String(process.env.MC_MEMORY_MAX || manifest?.memory?.max || '4G'),
+    min: String(process.env.MC_MEMORY_MIN || manifest?.memory?.min || '2G')
+  }
+}
+
+function resolveMemoryConfigFromSettings(manifest, settings) {
+  if (!settings) return resolveMemoryConfig(manifest)
+
+  const minGb = Math.max(1, Math.min(12, Number(settings.memoryMinGb) || 2))
+  const maxGb = Math.max(minGb, Math.min(16, Number(settings.memoryMaxGb) || 4))
+
+  return {
+    min: `${minGb}G`,
+    max: `${maxGb}G`
+  }
+}
+
+function formatServerAddress(server) {
+  if (!server?.host) return DEFAULT_SERVER_HOST
+  if (!server.port || Number(server.port) === DEFAULT_SERVER_PORT) return server.host
+  return `${server.host}:${server.port}`
+}
+
+function clampPercent(value, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(0, Math.min(100, number))
+}
+
+function upsertOptionLine(lines, key, value) {
+  const nextLine = `${key}:${value}`
+  const index = lines.findIndex((line) => line.startsWith(`${key}:`))
+  if (index >= 0) {
+    lines[index] = nextLine
+    return
+  }
+  lines.push(nextLine)
+}
+
+function applyMinecraftOptions(root, settings) {
+  if (!settings) return
+
+  const optionsPath = path.join(root, 'options.txt')
+  const lines = existsFile(optionsPath)
+    ? fs.readFileSync(optionsPath, 'utf-8').split(/\r?\n/).filter(Boolean)
+    : []
+
+  const master = clampPercent(settings.masterVolume, 100) / 100
+  const music = clampPercent(settings.musicVolume, 30) / 100
+  upsertOptionLine(lines, 'soundCategory_master', master.toFixed(2))
+  upsertOptionLine(lines, 'soundCategory_music', music.toFixed(2))
+
+  fs.writeFileSync(optionsPath, `${lines.join('\n')}\n`, 'utf-8')
 }
 
 async function downloadFile(url, targetPath) {
@@ -194,7 +457,8 @@ async function syncZipPackage({ root, mainWindow, manifest, statePath, state, ta
     throw new Error('매니페스트 형식 오류: package.url 이 필요합니다.')
   }
 
-  const hashCheckDisabled = String(process.env.MODPACK_SKIP_HASH_CHECK || '').toLowerCase() === 'true'
+  const hashCheckDisabled =
+    String(process.env.MODPACK_SKIP_HASH_CHECK || '').toLowerCase() === 'true'
   const ready = readModpackReady(root)
   const expectedZipSha = pack.sha256 ? String(pack.sha256).toLowerCase() : ''
   const readyShaOk =
@@ -293,20 +557,12 @@ async function syncZipPackage({ root, mainWindow, manifest, statePath, state, ta
 }
 
 async function ensureModsSynced({ root, mainWindow }) {
-  const manifestUrl = process.env.MODPACK_MANIFEST_URL
-  if (!manifestUrl) {
+  const manifest = await loadModpackManifest(mainWindow)
+  if (!manifest) {
     mainWindow.webContents.send('status-update', '모드 매니페스트 미설정: 기존 mods 사용')
     emitInstallProgress(mainWindow, 70, '모드 매니페스트 미설정: 기존 mods 사용', 'MODPACK')
-    return
+    return null
   }
-
-  mainWindow.webContents.send('status-update', '모드 매니페스트 확인 중...')
-  emitInstallProgress(mainWindow, 22, '모드 매니페스트 확인 중...', 'MODPACK')
-  const response = await fetch(manifestUrl)
-  if (!response.ok) {
-    throw new Error(`매니페스트 요청 실패: ${response.status} ${response.statusText}`)
-  }
-  const manifest = await response.json()
 
   const statePath = path.join(root, STATE_FILE)
   const state = readJsonSafe(statePath, {})
@@ -322,7 +578,7 @@ async function ensureModsSynced({ root, mainWindow }) {
       state,
       targetVersion
     })
-    return
+    return manifest
   }
 
   if (!Array.isArray(manifest.files)) {
@@ -334,7 +590,7 @@ async function ensureModsSynced({ root, mainWindow }) {
     if (allPresent) {
       mainWindow.webContents.send('status-update', `모드 최신 상태 유지 (${targetVersion})`)
       emitInstallProgress(mainWindow, 95, `모드 최신 상태 유지 (${targetVersion})`, 'MODPACK')
-      return
+      return manifest
     }
   }
 
@@ -354,7 +610,7 @@ async function ensureModsSynced({ root, mainWindow }) {
   if (updates.length === 0) {
     mainWindow.webContents.send('status-update', '모드 파일 검증 완료 (변경 없음)')
     writeJsonSafe(statePath, { ...state, modpackVersion: targetVersion })
-    return
+    return manifest
   }
 
   for (let i = 0; i < updates.length; i += 1) {
@@ -376,6 +632,7 @@ async function ensureModsSynced({ root, mainWindow }) {
   writeJsonSafe(statePath, { ...state, modpackVersion: targetVersion })
   mainWindow.webContents.send('status-update', `모드 업데이트 완료 (${updates.length}개)`)
   emitInstallProgress(mainWindow, 95, `모드 업데이트 완료 (${updates.length}개)`, 'MODPACK')
+  return manifest
 }
 
 function parseBadges(value) {
@@ -384,6 +641,70 @@ function parseBadges(value) {
     return Object.values(value).filter(Boolean).length
   }
   return 0
+}
+
+function resolveEconomyConfig() {
+  const manifest = readBundledManifest()
+  const economy = manifest?.economy || {}
+  const balanceApiUrl = String(
+    process.env.BALANCE_API_URL || economy.balanceApiUrl || economy.url || DEFAULT_BALANCE_API_URL
+  ).trim()
+  const token = String(process.env.BALANCE_API_TOKEN || economy.token || '').trim()
+
+  return {
+    enabled: economy.enabled !== false && Boolean(balanceApiUrl),
+    balanceApiUrl: balanceApiUrl.replace(/\/+$/, ''),
+    token
+  }
+}
+
+function normalizePlayerUuid(value) {
+  const raw = String(value || '')
+    .toLowerCase()
+    .replace(/[^0-9a-f]/g, '')
+  if (raw.length !== 32) return value
+  return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(
+    16,
+    20
+  )}-${raw.slice(20)}`
+}
+
+async function fetchNumismaticsBalance({ uuid, nickname }) {
+  const economy = resolveEconomyConfig()
+  if (!economy.enabled) return { enabled: false, balance: null }
+
+  const params = new URLSearchParams()
+  if (uuid) params.set('uuid', normalizePlayerUuid(uuid))
+  if (nickname) params.set('name', nickname)
+  if (!uuid && !nickname) return { enabled: false, balance: null }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 2500)
+
+  try {
+    const response = await fetch(`${economy.balanceApiUrl}/balance?${params.toString()}`, {
+      signal: controller.signal,
+      headers: economy.token ? { Authorization: `Bearer ${economy.token}` } : {}
+    })
+
+    if (response.status === 404) {
+      const payload = await response.json().catch(() => ({}))
+      return { enabled: true, balance: 0, season: payload.season || null }
+    }
+    if (!response.ok) return { enabled: false, balance: null }
+    const payload = await response.json()
+    const balance = Number(payload.balance)
+    return {
+      enabled: true,
+      balance: Number.isFinite(balance) ? balance : 0,
+      season: payload.season || null
+    }
+  } catch (error) {
+    console.error('Balance API error:', error)
+    return { enabled: false, balance: null, season: null }
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function getMongoClient() {
@@ -399,11 +720,17 @@ async function getMongoClient() {
 }
 
 async function fetchPlayerSummary({ uuid, nickname }) {
+  const balanceResult = await fetchNumismaticsBalance({ uuid, nickname })
+  const balance = balanceResult.balance
+  const season = balanceResult.season
+
   try {
     const client = await getMongoClient()
     if (!client) {
       return {
-        enabled: false,
+        enabled: balanceResult.enabled,
+        balance,
+        season,
         badgesCount: 0,
         ownedSpeciesCount: 0
       }
@@ -432,13 +759,17 @@ async function fetchPlayerSummary({ uuid, nickname }) {
 
     return {
       enabled: true,
+      balance,
+      season,
       badgesCount,
       ownedSpeciesCount
     }
   } catch (error) {
     console.error('Mongo summary error:', error)
     return {
-      enabled: false,
+      enabled: balanceResult.enabled,
+      balance,
+      season,
       badgesCount: 0,
       ownedSpeciesCount: 0,
       error: error.message
@@ -449,17 +780,40 @@ async function fetchPlayerSummary({ uuid, nickname }) {
 export function setupLauncher(mainWindow) {
   const authManager = new Auth('select_account')
 
+  async function buildLoginResult(xboxManager) {
+    const token = await xboxManager.getMinecraft()
+    writeSavedAuthToken(xboxManager.save(), token.profile)
+    return { success: true, profile: token.profile, mclcAuth: token.mclc() }
+  }
+
+  ipcMain.handle('restore-login', async () => {
+    try {
+      const savedToken = readSavedAuthToken()
+      if (!savedToken) return { success: false, needsLogin: true }
+
+      const xboxManager = await authManager.refresh(savedToken)
+      return buildLoginResult(xboxManager)
+    } catch (error) {
+      console.error('Restore login error:', error)
+      clearSavedAuthToken()
+      return { success: false, needsLogin: true, error: error.message }
+    }
+  })
+
   // Microsoft Login
   ipcMain.handle('ms-login', async () => {
     try {
       const xboxManager = await authManager.launch('electron')
-      const token = await xboxManager.getMinecraft()
-      // token.mclc() provides the authorization object needed by MCLC
-      return { success: true, profile: token.profile, mclcAuth: token.mclc() }
+      return buildLoginResult(xboxManager)
     } catch (error) {
       console.error('Login error:', error)
       return { success: false, error: error.message }
     }
+  })
+
+  ipcMain.handle('logout', async () => {
+    clearSavedAuthToken()
+    return { success: true }
   })
 
   ipcMain.handle('get-player-summary', async (_, payload) => {
@@ -467,7 +821,7 @@ export function setupLauncher(mainWindow) {
   })
 
   // Launch Game
-  ipcMain.handle('launch-game', async (event, { mclcAuth, launchRoot }) => {
+  ipcMain.handle('launch-game', async (event, { mclcAuth, launchRoot, settings }) => {
     try {
       emitInstallProgress(mainWindow, 1, '런처 준비 중...', 'PREPARE')
       const defaultRoot = path.join(
@@ -483,16 +837,19 @@ export function setupLauncher(mainWindow) {
         fs.mkdirSync(root, { recursive: true })
       }
 
-      const mcVersion = '1.21.1'
-
-      const fabricVersionID = await resolveFabricVersionId({
+      const manifest = await ensureModsSynced({ root, mainWindow })
+      const gameConfig = resolveGameConfig(manifest)
+      const serverConfig = resolveServerConfig(manifest)
+      const memoryConfig = resolveMemoryConfigFromSettings(manifest, settings)
+      const { mcVersion, versionId, loader } = await resolveLoaderVersionId({
         root,
-        mcVersion,
+        gameConfig,
         mainWindow
       })
-      await ensureModsSynced({ root, mainWindow })
+      const serverAddress = formatServerAddress(serverConfig)
+      applyMinecraftOptions(root, settings)
 
-      mainWindow.webContents.send('status-update', 'Starting Minecraft...')
+      mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
       emitInstallProgress(mainWindow, 100, '설치 준비 완료, 게임 시작', 'LAUNCH')
 
       const opts = {
@@ -501,14 +858,19 @@ export function setupLauncher(mainWindow) {
         version: {
           number: mcVersion,
           type: 'release',
-          custom: fabricVersionID // The function returns the version ID string
+          custom: versionId
         },
-        memory: {
-          max: '4G',
-          min: '2G'
-        },
-        customArgs: ['--quickPlayMultiplayer', 'localhost']
+        memory: memoryConfig,
+        customArgs:
+          serverConfig.quickConnect && settings?.autoConnect !== false
+            ? ['--quickPlayMultiplayer', serverAddress]
+            : []
       }
+
+      mainWindow.webContents.send(
+        'status-update',
+        `${mcVersion} / ${loader} 실행, 서버 접속: ${serverAddress}`
+      )
 
       launcher.launch(opts)
 

@@ -3,8 +3,12 @@ import { electronAPI } from '@electron-toolkit/preload'
 
 // Custom APIs for renderer
 const api = {
+  restoreLogin: () => ipcRenderer.invoke('restore-login'),
   msLogin: () => ipcRenderer.invoke('ms-login'),
+  logout: () => ipcRenderer.invoke('logout'),
   getPlayerSummary: (args) => ipcRenderer.invoke('get-player-summary', args),
+  getLauncherSettings: () => ipcRenderer.invoke('get-launcher-settings'),
+  saveLauncherSettings: (settings) => ipcRenderer.invoke('save-launcher-settings', settings),
   getLaunchDirectory: () => ipcRenderer.invoke('get-launch-directory'),
   chooseLaunchDirectory: () => ipcRenderer.invoke('choose-launch-directory'),
   launchGame: (args) => ipcRenderer.invoke('launch-game', args),

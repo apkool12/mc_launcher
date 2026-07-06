@@ -1,6 +1,24 @@
 {
   "version": "mod",
   "generatedAt": "2026-04-15T15:05:18.928Z",
+  "game": {
+    "minecraftVersion": "1.20.1",
+    "loader": "forge",
+    "forgeVersion": "47.4.0"
+  },
+  "server": {
+    "host": "bytemc.kro.kr",
+    "port": 25565,
+    "quickConnect": true
+  },
+  "memory": {
+    "min": "2G",
+    "max": "4G"
+  },
+  "economy": {
+    "enabled": true,
+    "balanceApiUrl": "http://161.33.22.158:8765"
+  },
   "package": {
     "url": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack.zip",
     "sha256": "2193d4e2ace5ee75f982497bd2d0a362f1d22315d934d5625edf58b1d5962147",
