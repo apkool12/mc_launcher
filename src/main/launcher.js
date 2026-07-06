@@ -217,25 +217,59 @@ async function ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow }) 
     return
   }
 
-  if (
-    typeof xmclInstaller.getVersionList !== 'function' ||
-    typeof xmclInstaller.install !== 'function'
-  ) {
+  if (typeof xmclInstaller.getVersionList !== 'function') {
     throw new Error(
-      '@xmcl/installer에서 Minecraft 설치 API를 찾을 수 없습니다. 패키지를 최신 상태로 설치해주세요.'
+      '@xmcl/installer에서 Minecraft 버전 목록 API를 찾을 수 없습니다. 패키지를 최신 상태로 설치해주세요.'
     )
   }
 
-  mainWindow.webContents.send('status-update', `Minecraft ${mcVersion} 설치 중...`)
-  emitInstallProgress(mainWindow, 8, `Minecraft ${mcVersion} 설치 중...`, 'MINECRAFT')
+  mainWindow.webContents.send('status-update', `Minecraft ${mcVersion} 파일 확인 중...`)
+  emitInstallProgress(mainWindow, 8, `Minecraft ${mcVersion} 파일 확인 중...`, 'MINECRAFT')
 
   const versionList = await xmclInstaller.getVersionList()
   const versionMeta = versionList?.versions?.find((version) => version.id === mcVersion)
-  if (!versionMeta) {
+  if (!versionMeta?.url) {
     throw new Error(`Minecraft ${mcVersion} 버전 정보를 찾을 수 없습니다.`)
   }
 
-  await xmclInstaller.install(versionMeta, root)
+  let versionJson = readJsonSafe(versionJsonPath, null)
+  if (!versionJson) {
+    mainWindow.webContents.send('status-update', `Minecraft ${mcVersion} JSON 다운로드 중...`)
+    emitInstallProgress(mainWindow, 9, `Minecraft ${mcVersion} JSON 다운로드 중...`, 'MINECRAFT')
+    const response = await fetch(versionMeta.url)
+    if (!response.ok) {
+      throw new Error(`Minecraft ${mcVersion} JSON 다운로드 실패: ${response.status}`)
+    }
+    versionJson = await response.json()
+    fs.mkdirSync(path.dirname(versionJsonPath), { recursive: true })
+    fs.writeFileSync(versionJsonPath, JSON.stringify(versionJson, null, 2), 'utf-8')
+  }
+
+  if (!existsFile(versionJarPath)) {
+    const client = versionJson?.downloads?.client
+    if (!client?.url) {
+      throw new Error(`Minecraft ${mcVersion} client jar 다운로드 URL을 찾을 수 없습니다.`)
+    }
+
+    mainWindow.webContents.send('status-update', `Minecraft ${mcVersion} jar 다운로드 중...`)
+    const jarBuffer = await downloadToBuffer(client.url, (downloadPercent) => {
+      emitInstallProgress(
+        mainWindow,
+        9 + downloadPercent * 0.03,
+        `Minecraft jar 다운로드 ${Math.round(downloadPercent)}%`,
+        'MINECRAFT'
+      )
+    })
+    const actualSha1 = crypto.createHash('sha1').update(jarBuffer).digest('hex')
+    if (client.sha1 && actualSha1.toLowerCase() !== String(client.sha1).toLowerCase()) {
+      throw new Error(
+        `Minecraft ${mcVersion} jar 해시 불일치 (expected=${client.sha1}, actual=${actualSha1})`
+      )
+    }
+    fs.mkdirSync(path.dirname(versionJarPath), { recursive: true })
+    fs.writeFileSync(versionJarPath, jarBuffer)
+  }
+
   emitInstallProgress(mainWindow, 12, `Minecraft ${mcVersion} 설치 완료`, 'MINECRAFT')
 }
 
