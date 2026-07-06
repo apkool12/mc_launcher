@@ -88,7 +88,9 @@ function hasVlcLibrary(dirPath) {
   try {
     if (!dirPath || !fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return false
     const entries = fs.readdirSync(dirPath, { withFileTypes: true })
-    const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
+    const fileNames = entries
+      .filter((entry) => entry.isFile() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
     if (process.platform === 'win32') {
       return fileNames.includes('libvlc.dll') && fileNames.includes('libvlccore.dll')
     }
