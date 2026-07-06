@@ -925,10 +925,13 @@ export function setupLauncher(mainWindow) {
           custom: versionId
         },
         memory: memoryConfig,
-        customArgs:
+        quickPlay:
           serverConfig.quickConnect && settings?.autoConnect !== false
-            ? ['--quickPlayMultiplayer', serverAddress]
-            : []
+            ? {
+                type: 'multiplayer',
+                identifier: serverAddress
+              }
+            : undefined
       }
 
       mainWindow.webContents.send(
