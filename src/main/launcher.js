@@ -241,11 +241,23 @@ function getMavenArtifactPath(root, descriptor) {
   return path.join(root, 'libraries', ...group.split('.'), artifact, version, fileName)
 }
 
-function getLibraryArtifactPath(root, library) {
-  const artifactPath = library?.downloads?.artifact?.path
-  if (artifactPath) return path.join(root, 'libraries', artifactPath)
-  if (library?.name) return getMavenArtifactPath(root, library.name)
-  return null
+function getLibraryDownloadInfo(root, library) {
+  const artifact = library?.downloads?.artifact
+  const artifactPath =
+    artifact?.path ||
+    (library?.name
+      ? path.relative(path.join(root, 'libraries'), getMavenArtifactPath(root, library.name))
+      : null)
+  if (!artifactPath) return null
+
+  const baseUrl = String(library?.url || 'https://libraries.minecraft.net/').replace(/\/?$/, '/')
+  const url = artifact?.url || `${baseUrl}${artifactPath.replaceAll(path.sep, '/')}`
+
+  return {
+    path: path.join(root, 'libraries', artifactPath),
+    url,
+    sha1: artifact?.sha1 || ''
+  }
 }
 
 function collectVersionClasspath(root, versionId, seen = new Set()) {
@@ -267,51 +279,67 @@ function collectVersionClasspath(root, versionId, seen = new Set()) {
   }
 }
 
-async function installVersionLibraries({ root, versionId, mainWindow }) {
-  if (typeof xmclInstaller.installLibraries !== 'function') return
-
-  const { libraries } = collectVersionClasspath(root, versionId)
-  if (libraries.length === 0) return
-
-  mainWindow.webContents.send('status-update', '손상된 라이브러리 복구 중...')
-  emitInstallProgress(mainWindow, 21, '손상된 라이브러리 복구 중...', 'MINECRAFT')
-  await xmclInstaller.installLibraries({
-    libraries,
-    minecraftDirectory: root
-  })
-}
-
 async function repairVersionClasspath({ root, mcVersion, versionId, mainWindow }) {
   const { jars, libraries } = collectVersionClasspath(root, versionId)
+  const libraryDownloads = libraries
+    .map((library) => getLibraryDownloadInfo(root, library))
+    .filter(Boolean)
   const candidates = [
-    ...jars,
-    ...libraries.map((library) => getLibraryArtifactPath(root, library)).filter(Boolean)
+    ...jars.map((jarPath) => ({ path: jarPath, type: 'version' })),
+    ...libraryDownloads.map((library) => ({ ...library, type: 'library' }))
   ]
-  const corruptFiles = []
+  const corruptEntries = []
+  const seen = new Set()
 
-  for (const candidate of new Set(candidates)) {
-    if (!existsFile(candidate)) continue
-    if (isValidZipFile(candidate)) continue
+  for (const candidate of candidates) {
+    if (!candidate?.path || seen.has(candidate.path)) continue
+    seen.add(candidate.path)
+    if (!existsFile(candidate.path)) continue
+    if (isValidZipFile(candidate.path)) continue
 
-    corruptFiles.push(candidate)
-    fs.rmSync(candidate, { force: true })
+    corruptEntries.push(candidate)
+    fs.rmSync(candidate.path, { force: true })
   }
 
-  if (corruptFiles.length === 0) return
+  if (corruptEntries.length === 0) return
 
   mainWindow.webContents.send(
     'status-update',
-    `손상된 Minecraft 파일 ${corruptFiles.length}개 재설치 중...`
+    `손상된 Minecraft 파일 ${corruptEntries.length}개 재설치 중...`
   )
   emitInstallProgress(
     mainWindow,
     20,
-    `손상된 Minecraft 파일 ${corruptFiles.length}개 재설치 중...`,
+    `손상된 Minecraft 파일 ${corruptEntries.length}개 재설치 중...`,
     'MINECRAFT'
   )
 
   await ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow })
-  await installVersionLibraries({ root, versionId, mainWindow })
+
+  const corruptLibraries = corruptEntries.filter((entry) => entry.type === 'library' && entry.url)
+  for (let index = 0; index < corruptLibraries.length; index += 1) {
+    const library = corruptLibraries[index]
+    mainWindow.webContents.send(
+      'status-update',
+      `손상된 라이브러리 복구 중... (${index + 1}/${corruptLibraries.length})`
+    )
+    const buffer = await downloadToBuffer(library.url, (downloadPercent) => {
+      emitInstallProgress(
+        mainWindow,
+        21 + ((index + downloadPercent / 100) / corruptLibraries.length) * 8,
+        `손상된 라이브러리 복구 ${index + 1}/${corruptLibraries.length}`,
+        'MINECRAFT'
+      )
+    })
+    if (library.sha1) {
+      const actualSha1 = crypto.createHash('sha1').update(buffer).digest('hex')
+      if (actualSha1.toLowerCase() !== String(library.sha1).toLowerCase()) {
+        throw new Error(`라이브러리 해시 불일치: ${path.basename(library.path)}`)
+      }
+    }
+    fs.mkdirSync(path.dirname(library.path), { recursive: true })
+    fs.writeFileSync(library.path, buffer)
+  }
 }
 
 function getModpackReadyPath(root) {
