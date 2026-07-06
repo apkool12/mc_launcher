@@ -43,6 +43,30 @@ function isJava17(javaPath) {
   }
 }
 
+function findJavaExecutables(dirPath, depth = 0) {
+  if (!dirPath || depth > 8) return []
+
+  try {
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return []
+    const executable = process.platform === 'win32' ? 'java.exe' : 'java'
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+    const results = []
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name)
+      if (entry.isFile() && entry.name === executable) {
+        results.push(fullPath)
+      } else if (entry.isDirectory()) {
+        results.push(...findJavaExecutables(fullPath, depth + 1))
+      }
+    }
+
+    return results
+  } catch {
+    return []
+  }
+}
+
 function resolveJava17Path() {
   const candidates = [
     getJavaExecutable(process.env.JAVA_17_HOME),
@@ -62,6 +86,71 @@ function resolveJava17Path() {
   }
 
   return candidates.find((candidate) => isJava17(candidate)) || null
+}
+
+function resolveBundledJava17Path(root) {
+  const runtimeRoot = path.join(root, 'runtime', 'java-runtime-beta')
+  const candidates = [
+    getJavaExecutable(runtimeRoot),
+    path.join(runtimeRoot, 'jre.bundle', 'Contents', 'Home', 'bin', 'java'),
+    path.join(runtimeRoot, 'Contents', 'Home', 'bin', 'java'),
+    ...findJavaExecutables(runtimeRoot)
+  ]
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    try {
+      if (existsFile(candidate) && process.platform !== 'win32') {
+        fs.chmodSync(candidate, 0o755)
+      }
+    } catch {
+      // Continue to validation below.
+    }
+    if (isJava17(candidate)) return candidate
+  }
+
+  return null
+}
+
+async function ensureJava17Path({ root, mainWindow }) {
+  const systemJava = resolveJava17Path()
+  if (systemJava) return systemJava
+
+  const bundledJava = resolveBundledJava17Path(root)
+  if (bundledJava) return bundledJava
+
+  if (
+    typeof xmclInstaller.fetchJavaRuntimeManifest !== 'function' ||
+    typeof xmclInstaller.installJavaRuntimeTask !== 'function'
+  ) {
+    throw new Error(
+      'Java 17이 설치되어 있지 않고, 런처가 Java 런타임 설치 API를 찾지 못했습니다. Java 17을 설치한 뒤 다시 실행해주세요.'
+    )
+  }
+
+  const destination = path.join(root, 'runtime', 'java-runtime-beta')
+  mainWindow.webContents.send('status-update', 'Java 17 런타임 다운로드 준비 중...')
+  emitInstallProgress(mainWindow, 5, 'Java 17 런타임 다운로드 준비 중...', 'JAVA')
+
+  const manifest = await xmclInstaller.fetchJavaRuntimeManifest({
+    target: xmclInstaller.JavaRuntimeTargetType?.Beta || 'java-runtime-beta'
+  })
+
+  mainWindow.webContents.send('status-update', 'Java 17 런타임 다운로드 중...')
+  emitInstallProgress(mainWindow, 6, 'Java 17 런타임 다운로드 중...', 'JAVA')
+  const task = xmclInstaller.installJavaRuntimeTask({
+    destination,
+    manifest
+  })
+  await task.startAndWait()
+
+  const installedJava = resolveBundledJava17Path(root)
+  if (!installedJava) {
+    throw new Error('Java 17 런타임 설치 후 java 실행 파일을 찾지 못했습니다.')
+  }
+
+  emitInstallProgress(mainWindow, 9, 'Java 17 런타임 준비 완료', 'JAVA')
+  return installedJava
 }
 
 function emitInstallProgress(mainWindow, percent, message, stage = 'PREPARE') {
@@ -340,7 +429,7 @@ async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow
   emitInstallProgress(mainWindow, 10, `Forge ${targetForge} 설치 중...`, 'FORGE')
 
   const [forgeMcVersion, ...forgeVersionParts] = targetForge.split('-')
-  const java17Path = resolveJava17Path()
+  const java17Path = await ensureJava17Path({ root, mainWindow })
   if (java17Path) {
     mainWindow.webContents.send('status-update', `Forge ${targetForge} 설치 중... (Java 17)`)
   }
@@ -950,6 +1039,7 @@ export function setupLauncher(mainWindow) {
       const gameConfig = resolveGameConfig(manifest)
       const serverConfig = resolveServerConfig(manifest)
       const memoryConfig = resolveMemoryConfigFromSettings(manifest, settings)
+      const java17Path = await ensureJava17Path({ root, mainWindow })
       const { mcVersion, versionId, loader } = await resolveLoaderVersionId({
         root,
         gameConfig,
@@ -957,7 +1047,6 @@ export function setupLauncher(mainWindow) {
       })
       const serverAddress = formatServerAddress(serverConfig)
       applyMinecraftOptions(root, settings)
-      const java17Path = resolveJava17Path()
 
       mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
       emitInstallProgress(mainWindow, 100, '설치 준비 완료, 게임 시작', 'LAUNCH')
