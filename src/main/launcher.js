@@ -68,6 +68,22 @@ function hasWaterMedia(root) {
   }
 }
 
+function getBinaryInfo(filePath) {
+  try {
+    return spawnSync('/usr/bin/file', [filePath], { encoding: 'utf-8' }).stdout || ''
+  } catch {
+    return ''
+  }
+}
+
+function isDarwinBinaryCompatible(filePath) {
+  const binaryInfo = getBinaryInfo(filePath)
+  if (!binaryInfo) return true
+  if (process.arch === 'arm64') return /\barm64\b/.test(binaryInfo)
+  if (process.arch === 'x64') return /\bx86_64\b/.test(binaryInfo)
+  return true
+}
+
 function hasVlcLibrary(dirPath) {
   try {
     if (!dirPath || !fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return false
@@ -77,10 +93,13 @@ function hasVlcLibrary(dirPath) {
       return fileNames.includes('libvlc.dll') && fileNames.includes('libvlccore.dll')
     }
     if (process.platform === 'darwin') {
+      const libvlc = path.join(dirPath, 'libvlc.dylib')
+      const libvlccore = path.join(dirPath, 'libvlccore.dylib')
       return (
-        fileNames.includes('libvlc.dylib') ||
-        fileNames.includes('libvlccore.dylib') ||
-        fileNames.includes('VLC')
+        fileNames.includes('libvlc.dylib') &&
+        fileNames.includes('libvlccore.dylib') &&
+        isDarwinBinaryCompatible(libvlc) &&
+        isDarwinBinaryCompatible(libvlccore)
       )
     }
     return fileNames.includes('libvlc.so') || fileNames.some((name) => /^libvlc\.so\./.test(name))
@@ -152,7 +171,9 @@ async function ensureWaterMediaVlc({ root, mainWindow }) {
     title: 'VLC 설치 필요',
     message: 'WaterMedia 사용을 위해 VLC가 필요합니다.',
     detail:
-      'VLC를 설치하면 런처가 다음 실행부터 경로를 자동으로 감지합니다. 설치 후 런처에서 다시 게임을 실행해주세요.'
+      process.platform === 'darwin' && process.arch === 'arm64'
+        ? 'Apple Silicon(M1/M2/M3/M4)용 VLC를 설치해주세요. Intel(x86_64)용 VLC는 Minecraft arm64 실행 환경에서 사용할 수 없습니다.'
+        : 'VLC를 설치하면 런처가 다음 실행부터 경로를 자동으로 감지합니다. 설치 후 런처에서 다시 게임을 실행해주세요.'
   })
 
   if (result.response === 0) {
