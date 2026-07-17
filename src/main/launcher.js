@@ -8,6 +8,8 @@ import crypto from 'crypto'
 import AdmZip from 'adm-zip'
 import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
+import { parseMrpackIndex } from './mrpack.js'
+import { sha512Hex, needsDownload, staleModPaths } from './mrpackSync.js'
 
 const launcher = new Client()
 const require = createRequire(import.meta.url)
@@ -1145,6 +1147,97 @@ async function syncZipPackage({ root, mainWindow, manifest, statePath, state, ta
   emitInstallProgress(mainWindow, 95, '모드팩(zip) 업데이트 완료', 'MODPACK')
 }
 
+function readIndexFromMrpack(zipBuffer) {
+  const zip = new AdmZip(zipBuffer)
+  const entry = zip.getEntry('modrinth.index.json')
+  if (!entry) throw new Error('mrpack에 modrinth.index.json이 없습니다.')
+  return { zip, index: JSON.parse(zip.readAsText(entry)) }
+}
+
+function extractOverrides(zip, root, folders) {
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue
+    for (const folder of folders) {
+      const prefix = `${folder}/`
+      if (entry.entryName.startsWith(prefix)) {
+        const rel = entry.entryName.slice(prefix.length)
+        const target = path.join(root, rel)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, entry.getData())
+      }
+    }
+  }
+}
+
+async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state, targetVersion }) {
+  const mrpack = manifest.mrpack
+  if (!mrpack?.url) throw new Error('매니페스트 형식 오류: mrpack.url 이 필요합니다.')
+
+  const ready = readModpackReady(root)
+  const alreadyInstalled =
+    ready?.mode === 'mrpack' &&
+    String(ready.version || '') === targetVersion &&
+    Array.isArray(ready.installedPaths) &&
+    ready.installedPaths.every((p) => existsFile(path.join(root, p)))
+
+  if (alreadyInstalled && hasJarMods(root)) {
+    mainWindow.webContents.send('status-update', `모드팩 캐시 사용 (${targetVersion})`)
+    emitInstallProgress(mainWindow, 70, `모드팩 캐시 사용 (${targetVersion})`, 'MODPACK')
+    writeJsonSafe(statePath, { ...state, modpackVersion: targetVersion, modpackMode: 'mrpack' })
+    return { fabricLoaderVersion: ready.fabricLoaderVersion || null }
+  }
+
+  mainWindow.webContents.send('status-update', 'Cobbleverse(.mrpack) 다운로드 중...')
+  emitInstallProgress(mainWindow, 25, 'Cobbleverse(.mrpack) 다운로드 시작', 'DOWNLOAD')
+  const mrpackBuffer = await downloadToBuffer(mrpack.url, (pct) => {
+    emitInstallProgress(mainWindow, 25 + pct * 0.1, `모드팩 인덱스 다운로드 ${Math.round(pct)}%`, 'DOWNLOAD')
+  })
+  if (mrpack.sha512) {
+    const actual = sha512Hex(mrpackBuffer)
+    if (actual.toLowerCase() !== String(mrpack.sha512).toLowerCase()) {
+      throw new Error(`mrpack sha512 불일치 (expected=${mrpack.sha512}, actual=${actual})`)
+    }
+  }
+
+  const { zip, index } = readIndexFromMrpack(mrpackBuffer)
+  const parsed = parseMrpackIndex(index, 'client')
+
+  const total = parsed.files.length || 1
+  for (let i = 0; i < parsed.files.length; i += 1) {
+    const file = parsed.files[i]
+    const localPath = path.join(root, file.path)
+    let local = null
+    if (existsFile(localPath)) local = sha512Hex(fs.readFileSync(localPath))
+    if (needsDownload(local, file)) {
+      const buffer = await downloadToBuffer(file.downloads[0])
+      if (file.sha512 && sha512Hex(buffer).toLowerCase() !== file.sha512.toLowerCase()) {
+        throw new Error(`모드 해시 불일치: ${file.path}`)
+      }
+      fs.mkdirSync(path.dirname(localPath), { recursive: true })
+      fs.writeFileSync(localPath, buffer)
+    }
+    emitInstallProgress(mainWindow, 35 + ((i + 1) / total) * 45, `모드 설치 ${i + 1}/${total}`, 'DOWNLOAD')
+  }
+
+  extractOverrides(zip, root, ['overrides', 'client-overrides'])
+
+  const nextPaths = parsed.files.map((f) => f.path)
+  const removed = staleModPaths(ready?.installedPaths || [], nextPaths)
+  for (const rel of removed) fs.rmSync(path.join(root, rel), { force: true })
+
+  writeJsonSafe(statePath, { ...state, modpackVersion: targetVersion, modpackMode: 'mrpack' })
+  writeModpackReady(root, {
+    mode: 'mrpack',
+    version: targetVersion,
+    url: String(mrpack.url),
+    installedPaths: nextPaths,
+    fabricLoaderVersion: parsed.loaderVersion,
+    updatedAt: new Date().toISOString()
+  })
+  emitInstallProgress(mainWindow, 82, '모드팩(.mrpack) 설치 완료', 'MODPACK')
+  return { fabricLoaderVersion: parsed.loaderVersion }
+}
+
 async function ensureModsSynced({ root, mainWindow }) {
   const manifest = await loadModpackManifest(mainWindow)
   if (!manifest) {
@@ -1157,6 +1250,18 @@ async function ensureModsSynced({ root, mainWindow }) {
   const state = readJsonSafe(statePath, {})
   const currentVersion = state.modpackVersion
   const targetVersion = String(manifest.version || '0')
+
+  if (manifest.mrpack) {
+    const { fabricLoaderVersion } = await syncMrpackPackage({
+      root,
+      mainWindow,
+      manifest,
+      statePath,
+      state,
+      targetVersion
+    })
+    return { ...manifest, __fabricLoaderVersion: fabricLoaderVersion }
+  }
 
   if (manifest.package) {
     await syncZipPackage({
