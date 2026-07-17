@@ -1,11 +1,9 @@
 {
-  "version": "mod-20260706-kubejs",
-  "manifestUrl": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack-manifest.json",
-  "generatedAt": "2026-07-06T03:42:00.000Z",
+  "version": "cobbleverse-1.7.41b",
+  "generatedAt": "2026-07-17T00:00:00.000Z",
   "game": {
-    "minecraftVersion": "1.20.1",
-    "loader": "forge",
-    "forgeVersion": "47.4.0"
+    "minecraftVersion": "1.21.1",
+    "loader": "fabric"
   },
   "server": {
     "host": "161.33.22.158",
@@ -13,18 +11,15 @@
     "quickConnect": true
   },
   "memory": {
-    "min": "2G",
-    "max": "4G"
+    "min": "4G",
+    "max": "6G"
   },
-  "economy": {
-    "enabled": true,
-    "balanceApiUrl": "http://161.33.22.158:8765",
-    "token": "f284acbdbcf96109dcb452615b942decbf365652944ec5ef"
+  "mrpack": {
+    "url": "https://cdn.modrinth.com/data/Jkb29YJU/versions/T9GJwPoJ/COBBLEVERSE%201.7.41b.mrpack",
+    "version": "1.7.41b",
+    "sha512": "d9669e1d99db2645c6540bcab60ac0454e97a1f7c466454651a386dc0fdbf6c7aa796e8cc747707377745adaf6e085da0d57af35a350220515544aa2ffb87f81"
   },
-  "package": {
-    "url": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack.zip",
-    "sha256": "0794384ea2aad7982a313965de74e62c11b26db199f2be97316efec79780ce68",
-    "size": 689255790,
-    "extractTo": "."
+  "playerData": {
+    "url": "http://161.33.22.158:8765"
   }
 }

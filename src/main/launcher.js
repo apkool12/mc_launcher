@@ -24,6 +24,7 @@ const DEFAULT_FORGE_VERSION = '47.4.0'
 const DEFAULT_SERVER_HOST = 'localhost'
 const DEFAULT_SERVER_PORT = 25565
 const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
+const DEFAULT_JAVA_MAJOR = 21
 const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
 let remoteManifestCache = null
 
@@ -304,6 +305,11 @@ async function installWindowsJavaRuntime({ root, mainWindow, major }) {
     const detail = error?.message ? ` (${error.message})` : ''
     throw new Error(`Java ${major} 런타임 설치 실패${detail}`)
   }
+}
+
+function resolveRequiredJavaMajor(mcVersion) {
+  const [, minor] = String(mcVersion || '').split('.')
+  return Number(minor) >= 21 ? 21 : 17
 }
 
 async function ensureJavaPath({ root, mainWindow, requiredMajor }) {
@@ -1549,7 +1555,8 @@ export function setupLauncher(mainWindow) {
       const gameConfig = resolveGameConfig(manifest)
       const serverConfig = resolveServerConfig(manifest)
       const memoryConfig = resolveMemoryConfigFromSettings(manifest, settings)
-      const java17Path = await ensureJavaPath({ root, mainWindow, requiredMajor: 17 })
+      const requiredMajor = resolveRequiredJavaMajor(gameConfig.minecraftVersion)
+      const javaPath = await ensureJavaPath({ root, mainWindow, requiredMajor })
       const { mcVersion, versionId, loader } = await resolveLoaderVersionId({
         root,
         gameConfig,
@@ -1565,7 +1572,7 @@ export function setupLauncher(mainWindow) {
       const opts = {
         authorization,
         root: root,
-        ...(java17Path ? { javaPath: java17Path } : {}),
+        ...(javaPath ? { javaPath } : {}),
         version: {
           number: mcVersion,
           type: 'release',
