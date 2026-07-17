@@ -1198,16 +1198,46 @@ function extractOverrides(zip, root, folders) {
   }
 }
 
+async function installExtraMods({ root, mainWindow, extraMods }) {
+  const list = Array.isArray(extraMods) ? extraMods : []
+  const paths = []
+  for (let i = 0; i < list.length; i += 1) {
+    const mod = list[i]
+    if (!mod?.path || !mod?.url) continue
+    const localPath = safeJoin(root, mod.path)
+    let local = null
+    if (existsFile(localPath)) local = sha512Hex(fs.readFileSync(localPath))
+    if (needsDownload(local, mod)) {
+      const buffer = await downloadToBuffer(mod.url)
+      if (mod.sha512 && sha512Hex(buffer).toLowerCase() !== String(mod.sha512).toLowerCase()) {
+        throw new Error(`추가 모드 해시 불일치: ${mod.path}`)
+      }
+      fs.mkdirSync(path.dirname(localPath), { recursive: true })
+      fs.writeFileSync(localPath, buffer)
+    }
+    paths.push(mod.path)
+    emitInstallProgress(
+      mainWindow,
+      80 + ((i + 1) / list.length) * 2,
+      `추가 모드 설치 ${i + 1}/${list.length}`,
+      'DOWNLOAD'
+    )
+  }
+  return paths
+}
+
 async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state, targetVersion }) {
   const mrpack = manifest.mrpack
   if (!mrpack?.url) throw new Error('매니페스트 형식 오류: mrpack.url 이 필요합니다.')
 
   const ready = readModpackReady(root)
+  const extraModsList = Array.isArray(manifest.extraMods) ? manifest.extraMods : []
   const alreadyInstalled =
     ready?.mode === 'mrpack' &&
     String(ready.version || '') === targetVersion &&
     Array.isArray(ready.installedPaths) &&
-    ready.installedPaths.every((p) => existsFile(path.join(root, p)))
+    ready.installedPaths.every((p) => existsFile(path.join(root, p))) &&
+    extraModsList.every((m) => m?.path && existsFile(path.join(root, m.path)))
 
   if (alreadyInstalled && hasJarMods(root)) {
     mainWindow.webContents.send('status-update', `모드팩 캐시 사용 (${targetVersion})`)
@@ -1260,7 +1290,9 @@ async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state,
 
   extractOverrides(zip, root, ['overrides', 'client-overrides'])
 
-  const nextPaths = parsed.files.map((f) => f.path)
+  const extraPaths = await installExtraMods({ root, mainWindow, extraMods: manifest.extraMods })
+
+  const nextPaths = [...parsed.files.map((f) => f.path), ...extraPaths]
   const removed = staleModPaths(ready?.installedPaths || [], nextPaths)
   for (const rel of removed) fs.rmSync(path.join(root, rel), { force: true })
 
