@@ -630,8 +630,9 @@ async function resolveFabricVersionId({ root, mcVersion, mainWindow, pinnedLoade
   const statePath = path.join(root, STATE_FILE)
   const state = readJsonSafe(statePath, {})
   const cachedVersionId = state.fabricVersionId
+  const cacheMatchesPin = !pinnedLoader || state.fabricLoader === pinnedLoader
 
-  if (cachedVersionId) {
+  if (cachedVersionId && cacheMatchesPin) {
     const versionJsonPath = path.join(root, 'versions', cachedVersionId, `${cachedVersionId}.json`)
     if (existsFile(versionJsonPath)) {
       mainWindow.webContents.send('status-update', `Fabric 캐시 사용: ${cachedVersionId}`)

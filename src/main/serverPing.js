@@ -17,6 +17,7 @@ export function decodeVarInt(buf, offset = 0) {
   let size = 0
   let byte
   do {
+    if (offset + size >= buf.length) throw new Error('VarInt out of range')
     byte = buf[offset + size]
     value |= (byte & 0x7f) << (7 * size)
     size += 1
@@ -74,7 +75,10 @@ export function pingServer(host, port, timeoutMs = 2000) {
   return new Promise((resolve) => {
     const socket = new net.Socket()
     let buffer = Buffer.alloc(0)
+    let settled = false
     const done = (result) => {
+      if (settled) return
+      settled = true
       socket.destroy()
       resolve(result)
     }
@@ -82,6 +86,7 @@ export function pingServer(host, port, timeoutMs = 2000) {
     socket.setTimeout(timeoutMs)
     socket.on('timeout', () => done({ online: false }))
     socket.on('error', () => done({ online: false }))
+    socket.on('close', () => done({ online: false }))
 
     socket.connect(port, host, () => {
       socket.write(buildHandshakePacket(host, port))
