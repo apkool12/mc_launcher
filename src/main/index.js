@@ -226,6 +226,7 @@ function startServerStatusLoop(window) {
   const checkStatus = async () => {
     const serverConfig = getServerConfig()
     const result = await pingServer(serverConfig.host, serverConfig.port, 1500)
+    if (window.isDestroyed()) return
     window.webContents.send('server-status', result)
   }
 
