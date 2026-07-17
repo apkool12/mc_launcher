@@ -3,7 +3,7 @@ import { join, normalize } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupLauncher } from './launcher'
-import net from 'net'
+import { pingServer } from './serverPing'
 import fs from 'fs'
 
 const LAUNCHER_CONFIG_FILE = 'launcher-config.json'
@@ -223,27 +223,10 @@ function createWindow() {
 
 // ===== Server Status Check Logic =====
 function startServerStatusLoop(window) {
-  const serverConfig = getServerConfig()
-  const checkStatus = () => {
-    const socket = new net.Socket()
-    socket.setTimeout(1000)
-
-    socket.on('connect', () => {
-      window.webContents.send('server-status', true)
-      socket.destroy()
-    })
-
-    socket.on('timeout', () => {
-      window.webContents.send('server-status', false)
-      socket.destroy()
-    })
-
-    socket.on('error', () => {
-      window.webContents.send('server-status', false)
-      socket.destroy()
-    })
-
-    socket.connect(serverConfig.port, serverConfig.host)
+  const checkStatus = async () => {
+    const serverConfig = getServerConfig()
+    const result = await pingServer(serverConfig.host, serverConfig.port, 1500)
+    window.webContents.send('server-status', result)
   }
 
   // Check every 5 seconds

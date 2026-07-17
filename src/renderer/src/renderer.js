@@ -474,12 +474,14 @@ window.api.onGameClosed((code) => {
 })
 
 // [NEW] Actual Server Status Update
-window.api.onServerStatus((online) => {
-  if (online) {
-    serverStatus.textContent = '서버 - 온라인'
+window.api.onServerStatus((payload) => {
+  if (payload.online) {
+    serverStatus.textContent = `서버 - 온라인 (접속자 ${payload.players.online}/${payload.players.max})`
+    serverStatus.title = payload.motd
     serverDot.classList.add('online')
   } else {
     serverStatus.textContent = '서버 - 오프라인'
+    serverStatus.title = ''
     serverDot.classList.remove('online')
   }
 })
