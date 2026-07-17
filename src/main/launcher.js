@@ -1154,17 +1154,24 @@ function readIndexFromMrpack(zipBuffer) {
   return { zip, index: JSON.parse(zip.readAsText(entry)) }
 }
 
+function safeJoin(root, relPath) {
+  const target = path.resolve(root, relPath)
+  const rel = path.relative(path.resolve(root), target)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`경로가 설치 폴더를 벗어납니다: ${relPath}`)
+  }
+  return target
+}
+
 function extractOverrides(zip, root, folders) {
-  for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue
-    for (const folder of folders) {
-      const prefix = `${folder}/`
-      if (entry.entryName.startsWith(prefix)) {
-        const rel = entry.entryName.slice(prefix.length)
-        const target = path.join(root, rel)
-        fs.mkdirSync(path.dirname(target), { recursive: true })
-        fs.writeFileSync(target, entry.getData())
-      }
+  for (const folder of folders) {
+    const prefix = `${folder}/`
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory || !entry.entryName.startsWith(prefix)) continue
+      const rel = entry.entryName.slice(prefix.length)
+      const target = safeJoin(root, rel)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, entry.getData())
     }
   }
 }
@@ -1205,7 +1212,7 @@ async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state,
   const total = parsed.files.length || 1
   for (let i = 0; i < parsed.files.length; i += 1) {
     const file = parsed.files[i]
-    const localPath = path.join(root, file.path)
+    const localPath = safeJoin(root, file.path)
     let local = null
     if (existsFile(localPath)) local = sha512Hex(fs.readFileSync(localPath))
     if (needsDownload(local, file)) {
