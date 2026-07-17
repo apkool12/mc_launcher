@@ -309,7 +309,7 @@ async function installWindowsJavaRuntime({ root, mainWindow, major }) {
 
 function resolveRequiredJavaMajor(mcVersion) {
   const [, minor] = String(mcVersion || '').split('.')
-  return Number(minor) >= 21 ? 21 : 17
+  return Number(minor) >= 21 ? DEFAULT_JAVA_MAJOR : 17
 }
 
 async function ensureJavaPath({ root, mainWindow, requiredMajor }) {
