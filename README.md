@@ -147,13 +147,37 @@ SERVER_PORT=25565
 
 ### 4-1) 서버 잔액/계절 API
 
-런처는 manifest의 `economy.balanceApiUrl` 또는 `BALANCE_API_URL` 환경변수로 Numismatics 잔액 API를 호출합니다.
-API 토큰은 민감정보이므로 git에 커밋하지 말고 `BALANCE_API_TOKEN` 환경변수나 비공개 배포 manifest에서만 주입하세요.
+런처는 원격 manifest의 `economy.balanceApiUrl` 또는 `BALANCE_API_URL` 환경변수로 Numismatics 잔액 API를 호출합니다.
+`economy.token` 또는 `BALANCE_API_TOKEN`이 있으면 `Authorization: Bearer <token>` 헤더로 서버에 보냅니다.
+
+서버에는 같은 토큰을 `/home/opc/minecraft/tools/balance-api.env`에 넣습니다.
+
+```env
+BALANCE_API_HOST=0.0.0.0
+BALANCE_API_PORT=8765
+BALANCE_API_TOKEN=your-long-random-token
+MINECRAFT_SERVER_ROOT=/home/opc/minecraft
+```
+
+원격 manifest 예시:
+
+```json
+{
+  "economy": {
+    "enabled": true,
+    "balanceApiUrl": "http://161.33.22.158:8765",
+    "token": "your-long-random-token"
+  }
+}
+```
+
+주의: 공개 GitHub Releases manifest에 넣은 토큰은 비밀이 아닙니다. 토큰을 숨겨야 하면 manifest를 비공개 URL로 배포하거나, 서버에서 Microsoft 계정/UUID 기반 검증을 별도로 구현해야 합니다.
 
 서버 배포용 예시는 `server_tools/`에 있습니다.
 
 - `server_tools/balance_api.py`: `world/data/numismatics_bank.dat`, `world/data/seasons.dat`를 읽는 API
 - `server_tools/bytemc-balance-api.service`: 사용자 systemd 서비스 예시
+- `server_tools/balance-api.env.example`: 서버 env 파일 예시
 
 ### 5) manifest에서 게임/서버 설정
 

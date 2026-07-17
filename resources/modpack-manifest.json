@@ -1,5 +1,6 @@
 {
   "version": "mod-20260706-kubejs",
+  "manifestUrl": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack-manifest.json",
   "generatedAt": "2026-07-06T03:42:00.000Z",
   "game": {
     "minecraftVersion": "1.20.1",
@@ -7,7 +8,7 @@
     "forgeVersion": "47.4.0"
   },
   "server": {
-    "host": "bytemc.kro.kr",
+    "host": "161.33.22.158",
     "port": 25565,
     "quickConnect": true
   },
@@ -17,7 +18,8 @@
   },
   "economy": {
     "enabled": true,
-    "balanceApiUrl": "http://161.33.22.158:8765"
+    "balanceApiUrl": "http://161.33.22.158:8765",
+    "token": "f284acbdbcf96109dcb452615b942decbf365652944ec5ef"
   },
   "package": {
     "url": "https://github.com/apkool12/mc_launcher/releases/download/mod/modpack.zip",

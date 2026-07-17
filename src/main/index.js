@@ -93,7 +93,10 @@ function readJsonSafe(filePath, fallback) {
 function readBundledManifest() {
   const candidates = [
     process.env.MODPACK_MANIFEST_FILE,
+    join(__dirname, '../../resources/modpack-manifest.json'),
     join(process.cwd(), 'resources', 'modpack-manifest.json'),
+    join(process.resourcesPath || '', 'app.asar.unpacked', 'resources', 'modpack-manifest.json'),
+    join(process.resourcesPath || '', 'app.asar.unpacked', 'modpack-manifest.json'),
     join(process.resourcesPath || '', 'resources', 'modpack-manifest.json'),
     join(process.resourcesPath || '', 'modpack-manifest.json')
   ].filter(Boolean)
@@ -253,7 +256,7 @@ function startServerStatusLoop(window) {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.bytemc.launcher')
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })

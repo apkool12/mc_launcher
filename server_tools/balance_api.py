@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 import gzip
+import hmac
 import json
 import os
 import struct
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 HOST = os.environ.get("BALANCE_API_HOST", "0.0.0.0")
 PORT = int(os.environ.get("BALANCE_API_PORT", "8765"))
 API_TOKEN = os.environ.get("BALANCE_API_TOKEN", "")
 SERVER_ROOT = Path(os.environ.get("MINECRAFT_SERVER_ROOT", "/home/opc/minecraft"))
+DOWNLOAD_DIR = Path(
+    os.environ.get("LAUNCHER_DOWNLOAD_DIR", str(SERVER_ROOT / "tools" / "downloads"))
+)
 BANK_FILE = SERVER_ROOT / "world" / "data" / "numismatics_bank.dat"
 SEASONS_FILE = SERVER_ROOT / "world" / "data" / "seasons.dat"
 SEASONS_CONFIG = SERVER_ROOT / "config" / "sereneseasons" / "seasons.toml"
@@ -209,8 +213,36 @@ def has_token(headers, params):
     if supplied.startswith("Bearer "):
         supplied = supplied[7:]
     else:
-        supplied = params.get("token", [""])[0]
-    return supplied == expected
+        supplied = headers.get("X-API-Token", "") or params.get("token", [""])[0]
+    return hmac.compare_digest(supplied, expected)
+
+
+def download_file_path(raw_name):
+    file_name = Path(unquote(raw_name)).name
+    if not file_name or file_name in (".", ".."):
+        return None
+
+    download_root = DOWNLOAD_DIR.resolve()
+    file_path = (download_root / file_name).resolve()
+    try:
+        file_path.relative_to(download_root)
+    except ValueError:
+        return None
+
+    if not file_path.is_file():
+        return None
+    return file_path
+
+
+def content_type_for(file_path):
+    suffix = file_path.suffix.lower()
+    if suffix == ".exe":
+        return "application/vnd.microsoft.portable-executable"
+    if suffix in (".yml", ".yaml"):
+        return "application/yaml; charset=utf-8"
+    if suffix == ".blockmap":
+        return "application/octet-stream"
+    return "application/octet-stream"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -224,16 +256,54 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_download(self, file_path, head_only=False):
+        stat = file_path.stat()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type_for(file_path))
+        self.send_header("Content-Length", str(stat.st_size))
+        self.send_header("Cache-Control", "public, max-age=300")
+        self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
+        self.end_headers()
+
+        if head_only:
+            return
+
+        with file_path.open("rb") as file:
+            while True:
+                chunk = file.read(1024 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
+    def handle_download(self, path, head_only=False):
+        file_path = download_file_path(path.removeprefix("/downloads/"))
+        if not file_path:
+            self.send_json(404, {"error": "download_not_found"})
+            return
+        self.send_download(file_path, head_only=head_only)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, X-API-Token, Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.end_headers()
+
+    def do_HEAD(self):
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/downloads/"):
+            self.handle_download(parsed.path, head_only=True)
+            return
+        self.send_response(404)
         self.end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
+
+        if parsed.path.startswith("/downloads/"):
+            self.handle_download(parsed.path)
+            return
 
         if parsed.path == "/health":
             self.send_json(200, {"ok": True})
