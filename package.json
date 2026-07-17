@@ -31,7 +31,6 @@
     "adm-zip": "^0.5.17",
     "axios": "^1.14.0",
     "minecraft-launcher-core": "^3.18.2",
-    "mongodb": "^6.21.0",
     "msmc": "^5.0.5"
   },
   "devDependencies": {

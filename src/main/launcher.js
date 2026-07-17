@@ -3,7 +3,6 @@ import { Auth } from 'msmc'
 import { app, ipcMain } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import { MongoClient } from 'mongodb'
 import crypto from 'crypto'
 import AdmZip from 'adm-zip'
 import { spawnSync } from 'child_process'
@@ -13,7 +12,6 @@ import { sha512Hex, needsDownload, staleModPaths } from './mrpackSync.js'
 
 const launcher = new Client()
 const require = createRequire(import.meta.url)
-let mongoClientPromise = null
 let xmclInstallerPromise = null
 const STATE_FILE = '.launcher-state.json'
 const MODPACK_READY_FILE = '.modpack-ready.json'
@@ -23,7 +21,6 @@ const DEFAULT_LOADER = 'forge'
 const DEFAULT_FORGE_VERSION = '47.4.0'
 const DEFAULT_SERVER_HOST = 'localhost'
 const DEFAULT_SERVER_PORT = 25565
-const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
 const DEFAULT_JAVA_MAJOR = 21
 const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
 let remoteManifestCache = null
@@ -1352,147 +1349,43 @@ async function ensureModsSynced({ root, mainWindow }) {
   return manifest
 }
 
-function parseBadges(value) {
-  if (Array.isArray(value)) return value.length
-  if (value && typeof value === 'object') {
-    return Object.values(value).filter(Boolean).length
-  }
-  return 0
-}
-
-function resolveEconomyConfig(manifest) {
-  const economy = manifest?.economy || {}
-  const balanceApiUrl = String(
-    process.env.BALANCE_API_URL || economy.balanceApiUrl || economy.url || DEFAULT_BALANCE_API_URL
-  ).trim()
-  const token = String(process.env.BALANCE_API_TOKEN || economy.token || '').trim()
-
-  return {
-    enabled: economy.enabled !== false && Boolean(balanceApiUrl),
-    balanceApiUrl: balanceApiUrl.replace(/\/+$/, ''),
-    token
-  }
-}
-
-function normalizePlayerUuid(value) {
-  const raw = String(value || '')
-    .toLowerCase()
-    .replace(/[^0-9a-f]/g, '')
-  if (raw.length !== 32) return value
-  return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(
-    16,
-    20
-  )}-${raw.slice(20)}`
-}
-
-async function fetchNumismaticsBalance({ uuid, nickname, mainWindow }) {
-  const manifest = await loadModpackManifest(mainWindow, { silent: true }).catch(() =>
-    readBundledManifest()
-  )
-  const economy = resolveEconomyConfig(manifest)
-  if (!economy.enabled) return { enabled: false, balance: null }
-
-  const params = new URLSearchParams()
-  if (uuid) params.set('uuid', normalizePlayerUuid(uuid))
-  if (nickname) params.set('name', nickname)
-  if (!uuid && !nickname) return { enabled: false, balance: null }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 2500)
-
-  try {
-    const response = await fetch(`${economy.balanceApiUrl}/balance?${params.toString()}`, {
-      signal: controller.signal,
-      headers: economy.token ? { Authorization: `Bearer ${economy.token}` } : {}
-    })
-
-    if (response.status === 404) {
-      const payload = await response.json().catch(() => ({}))
-      return { enabled: true, balance: 0, season: payload.season || null }
-    }
-    if (!response.ok) return { enabled: false, balance: null }
-    const payload = await response.json()
-    const balance = Number(payload.balance)
-    return {
-      enabled: true,
-      balance: Number.isFinite(balance) ? balance : 0,
-      season: payload.season || null
-    }
-  } catch (error) {
-    console.error('Balance API error:', error)
-    return { enabled: false, balance: null, season: null }
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-async function getMongoClient() {
-  const mongoUri = process.env.MONGO_URI
-  if (!mongoUri) return null
-
-  if (!mongoClientPromise) {
-    const client = new MongoClient(mongoUri)
-    mongoClientPromise = client.connect()
-  }
-
-  return mongoClientPromise
+function resolvePlayerDataConfig(manifest) {
+  const cfg = manifest?.playerData || {}
+  const url = String(process.env.PLAYER_DATA_URL || cfg.url || '').trim().replace(/\/+$/, '')
+  const token = String(process.env.PLAYER_DATA_TOKEN || cfg.token || '').trim()
+  return { enabled: Boolean(url), url, token }
 }
 
 async function fetchPlayerSummary({ uuid, nickname }, mainWindow) {
-  const balanceResult = await fetchNumismaticsBalance({ uuid, nickname, mainWindow })
-  const balance = balanceResult.balance
-  const season = balanceResult.season
+  const manifest = await loadModpackManifest(mainWindow, { silent: true }).catch(() =>
+    readBundledManifest()
+  )
+  const cfg = resolvePlayerDataConfig(manifest)
+  if (!cfg.enabled) return { enabled: false, pokedex: null, badges: null }
 
+  const params = new URLSearchParams()
+  if (uuid) params.set('uuid', uuid)
+  if (nickname) params.set('name', nickname)
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 2500)
   try {
-    const client = await getMongoClient()
-    if (!client) {
-      return {
-        enabled: balanceResult.enabled,
-        balance,
-        season,
-        badgesCount: 0,
-        ownedSpeciesCount: 0
-      }
-    }
-
-    const dbName = process.env.MONGO_DB || 'cobblemon'
-    const db = client.db(dbName)
-
-    const keys = []
-    if (uuid) keys.push({ uuid })
-    if (nickname) keys.push({ nickname })
-    if (nickname) keys.push({ playerName: nickname })
-
-    const query = keys.length > 0 ? { $or: keys } : {}
-
-    const progressDoc = await db.collection('player_progress').findOne(query)
-    const pokedexDoc = await db.collection('player_pokedex').findOne(query)
-
-    const badgesCount = parseBadges(progressDoc?.badges)
-    const ownedSpeciesRaw =
-      pokedexDoc?.ownedSpecies ??
-      pokedexDoc?.ownedPokemon ??
-      progressDoc?.ownedSpecies ??
-      progressDoc?.ownedPokemon
-    const ownedSpeciesCount = Array.isArray(ownedSpeciesRaw) ? ownedSpeciesRaw.length : 0
-
+    const response = await fetch(`${cfg.url}/player?${params.toString()}`, {
+      signal: controller.signal,
+      headers: cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {}
+    })
+    if (!response.ok) return { enabled: true, pokedex: null, badges: null }
+    const payload = await response.json()
     return {
       enabled: true,
-      balance,
-      season,
-      badgesCount,
-      ownedSpeciesCount
+      pokedex: payload.pokedex || null,
+      badges: payload.badges || null
     }
   } catch (error) {
-    console.error('Mongo summary error:', error)
-    return {
-      enabled: balanceResult.enabled,
-      balance,
-      season,
-      badgesCount: 0,
-      ownedSpeciesCount: 0,
-      error: error.message
-    }
+    console.error('Player data API error:', error)
+    return { enabled: false, pokedex: null, badges: null }
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

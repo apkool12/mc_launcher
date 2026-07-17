@@ -239,6 +239,11 @@ async function ensureLaunchDirectorySelected() {
 async function updatePlayerSummary(profile) {
   if (!profile) return
 
+  const pokedexLabel = summaryBalance.previousElementSibling
+  const badgesLabel = summarySeason.previousElementSibling
+  if (pokedexLabel) pokedexLabel.textContent = '도감'
+  if (badgesLabel) badgesLabel.textContent = '배지'
+
   userStatus.textContent = '여행 준비 완료'
   summaryBalance.textContent = '확인 중'
   summarySeason.textContent = '확인 중'
@@ -257,23 +262,16 @@ async function updatePlayerSummary(profile) {
       return
     }
 
-    if (Number.isFinite(Number(summary.balance))) {
-      const formattedBalance = Number(summary.balance).toLocaleString('ko-KR')
-      userStatus.textContent = '여행 준비 완료'
-      summaryBalance.textContent = formattedBalance
+    const caught = Number(summary.pokedex?.caught)
+    const total = Number(summary.pokedex?.total)
+    if (Number.isFinite(caught)) {
+      summaryBalance.textContent = Number.isFinite(total) ? `${caught}/${total}` : `${caught}`
     } else {
-      userStatus.textContent = '여행 준비 완료'
       summaryBalance.textContent = '조회 불가'
     }
 
-    if (summary.season?.label) {
-      const day = Number(summary.season.day)
-      summarySeason.textContent = Number.isFinite(day)
-        ? `${summary.season.label} ${day}일차`
-        : summary.season.label
-    } else {
-      summarySeason.textContent = '조회 불가'
-    }
+    const badgesCount = Number(summary.badges?.count)
+    summarySeason.textContent = Number.isFinite(badgesCount) ? `${badgesCount}개` : '조회 불가'
 
     playerSummary.classList.remove('hidden')
   } catch (error) {
