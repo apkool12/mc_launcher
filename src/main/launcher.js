@@ -1,16 +1,18 @@
 import { Client } from 'minecraft-launcher-core'
 import { Auth } from 'msmc'
-import { app, dialog, ipcMain, shell } from 'electron'
+import { app, ipcMain } from 'electron'
 import path from 'path'
-import * as xmclInstaller from '@xmcl/installer'
 import fs from 'fs'
 import { MongoClient } from 'mongodb'
 import crypto from 'crypto'
 import AdmZip from 'adm-zip'
 import { spawnSync } from 'child_process'
+import { createRequire } from 'module'
 
 const launcher = new Client()
+const require = createRequire(import.meta.url)
 let mongoClientPromise = null
+let xmclInstallerPromise = null
 const STATE_FILE = '.launcher-state.json'
 const MODPACK_READY_FILE = '.modpack-ready.json'
 const AUTH_CACHE_FILE = 'minecraft-auth-cache.json'
@@ -20,8 +22,55 @@ const DEFAULT_FORGE_VERSION = '47.4.0'
 const DEFAULT_SERVER_HOST = 'localhost'
 const DEFAULT_SERVER_PORT = 25565
 const DEFAULT_BALANCE_API_URL = 'http://161.33.22.158:8765'
-const VLC_DOWNLOAD_URL = 'https://www.videolan.org/vlc/'
 const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
+let remoteManifestCache = null
+
+function getAdoptiumJavaUrl(major) {
+  const arch =
+    process.arch === 'ia32' ? 'x86' : process.arch === 'arm64' ? 'aarch64' : 'x64'
+  return `https://api.adoptium.net/v3/binary/latest/${major}/ga/windows/${arch}/jre/hotspot/normal/eclipse?project=jdk`
+}
+
+function patchUndiciRequestModule(specifier) {
+  try {
+    const undici = require(specifier)
+    if (!undici || typeof undici.request !== 'function' || undici.request.__bytemcPatched) return
+
+    const originalRequest = undici.request
+    const patchedRequest = function patchedRequest(url, options = {}, ...rest) {
+      if (options && typeof options === 'object' && 'throwOnError' in options) {
+        const { throwOnError, ...safeOptions } = options
+        return originalRequest.call(this, url, safeOptions, ...rest)
+      }
+      return originalRequest.call(this, url, options, ...rest)
+    }
+    patchedRequest.__bytemcPatched = true
+    undici.request = patchedRequest
+  } catch {
+    // Some package-manager layouts do not expose every nested dependency path.
+  }
+}
+
+function patchUndiciCompatibility() {
+  patchUndiciRequestModule('undici')
+
+  for (const packageName of ['@xmcl/installer', '@xmcl/file-transfer']) {
+    try {
+      const packageRoot = path.dirname(require.resolve(`${packageName}/package.json`))
+      patchUndiciRequestModule(path.join(packageRoot, 'node_modules', 'undici'))
+    } catch {
+      // Dependency may be hoisted.
+    }
+  }
+}
+
+async function getXmclInstaller() {
+  if (!xmclInstallerPromise) {
+    patchUndiciCompatibility()
+    xmclInstallerPromise = import('@xmcl/installer')
+  }
+  return xmclInstallerPromise
+}
 
 function resolveArgumentValue(value, replacements) {
   if (typeof value !== 'string') return null
@@ -58,137 +107,6 @@ function resolveForgeJvmArgs(root, versionId) {
   return [...forgeArgs, ...FORGE_JVM_ARGS]
 }
 
-function hasWaterMedia(root) {
-  const modsDir = path.join(root, 'mods')
-  try {
-    if (!fs.existsSync(modsDir) || !fs.statSync(modsDir).isDirectory()) return false
-    return fs.readdirSync(modsDir).some((name) => /^watermedia.*\.jar$/i.test(name))
-  } catch {
-    return false
-  }
-}
-
-function getBinaryInfo(filePath) {
-  try {
-    return spawnSync('/usr/bin/file', [filePath], { encoding: 'utf-8' }).stdout || ''
-  } catch {
-    return ''
-  }
-}
-
-function isDarwinBinaryCompatible(filePath) {
-  const binaryInfo = getBinaryInfo(filePath)
-  if (!binaryInfo) return true
-  if (process.arch === 'arm64') return /\barm64\b/.test(binaryInfo)
-  if (process.arch === 'x64') return /\bx86_64\b/.test(binaryInfo)
-  return true
-}
-
-function hasVlcLibrary(dirPath) {
-  try {
-    if (!dirPath || !fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return false
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
-    const fileNames = entries
-      .filter((entry) => entry.isFile() || entry.isSymbolicLink())
-      .map((entry) => entry.name)
-    if (process.platform === 'win32') {
-      return fileNames.includes('libvlc.dll') && fileNames.includes('libvlccore.dll')
-    }
-    if (process.platform === 'darwin') {
-      const libvlc = path.join(dirPath, 'libvlc.dylib')
-      const libvlccore = path.join(dirPath, 'libvlccore.dylib')
-      return (
-        fileNames.includes('libvlc.dylib') &&
-        fileNames.includes('libvlccore.dylib') &&
-        isDarwinBinaryCompatible(libvlc) &&
-        isDarwinBinaryCompatible(libvlccore)
-      )
-    }
-    return fileNames.includes('libvlc.so') || fileNames.some((name) => /^libvlc\.so\./.test(name))
-  } catch {
-    return false
-  }
-}
-
-function getVlcCandidates() {
-  if (process.platform === 'darwin') {
-    return [
-      '/Applications/VLC.app/Contents/Frameworks',
-      '/Applications/VLC.app/Contents/MacOS',
-      '/Applications/VLC.app/Contents/MacOS/lib',
-      path.join(app.getPath('home'), 'Applications', 'VLC.app', 'Contents', 'Frameworks'),
-      path.join(app.getPath('home'), 'Applications', 'VLC.app', 'Contents', 'MacOS'),
-      path.join(app.getPath('home'), 'Applications', 'VLC.app', 'Contents', 'MacOS', 'lib')
-    ]
-  }
-
-  if (process.platform === 'win32') {
-    return [
-      'C:\\Program Files\\VideoLAN\\VLC',
-      'C:\\Program Files (x86)\\VideoLAN\\VLC',
-      path.join(app.getPath('home'), 'AppData', 'Local', 'Programs', 'VideoLAN', 'VLC')
-    ]
-  }
-
-  return [
-    '/usr/lib/vlc',
-    '/usr/lib/x86_64-linux-gnu',
-    '/usr/local/lib',
-    '/snap/vlc/current/usr/lib'
-  ]
-}
-
-function findVlcDiscoveryPath() {
-  const configuredPath = String(process.env.VLC_DISCOVERY_PATH || '').trim()
-  const candidates = [configuredPath, ...getVlcCandidates()].filter(Boolean)
-  return candidates.find((candidate) => hasVlcLibrary(candidate)) || null
-}
-
-function writeWaterMediaVlcPath(root, vlcPath) {
-  const watermediaDir = path.join(root, 'config', 'watermedia')
-  fs.mkdirSync(watermediaDir, { recursive: true })
-  fs.writeFileSync(path.join(watermediaDir, 'custom_vlc_path.txt'), `${vlcPath}\n`, 'utf-8')
-}
-
-async function ensureWaterMediaVlc({ root, mainWindow }) {
-  if (!hasWaterMedia(root)) return { jvmArgs: [], found: false, required: false }
-
-  const vlcPath = findVlcDiscoveryPath()
-  if (vlcPath) {
-    writeWaterMediaVlcPath(root, vlcPath)
-    mainWindow.webContents.send('status-update', 'WaterMedia VLC 경로 자동 설정 완료')
-    return {
-      jvmArgs: [`-Dvlc4j.userDiscoveryPath=${encodeURIComponent(vlcPath)}`],
-      found: true,
-      required: true,
-      path: vlcPath
-    }
-  }
-
-  const result = await dialog.showMessageBox(mainWindow, {
-    type: 'warning',
-    buttons: ['VLC 설치 페이지 열기', '취소'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'VLC 설치 필요',
-    message: 'WaterMedia 사용을 위해 VLC가 필요합니다.',
-    detail:
-      process.platform === 'darwin' && process.arch === 'arm64'
-        ? 'Apple Silicon(M1/M2/M3/M4)용 VLC를 설치해주세요. Intel(x86_64)용 VLC는 Minecraft arm64 실행 환경에서 사용할 수 없습니다.'
-        : 'VLC를 설치하면 런처가 다음 실행부터 경로를 자동으로 감지합니다. 설치 후 런처에서 다시 게임을 실행해주세요.'
-  })
-
-  if (result.response === 0) {
-    shell.openExternal(VLC_DOWNLOAD_URL)
-  }
-
-  mainWindow.webContents.send(
-    'status-update',
-    'WaterMedia 사용을 위해 VLC 설치가 필요합니다. 설치 후 런처를 다시 실행해주세요.'
-  )
-  return { jvmArgs: [], found: false, required: true }
-}
-
 function getDefaultLaunchDirectory() {
   return path.join(app.getPath('appData'), 'ByteMC Launcher')
 }
@@ -199,13 +117,13 @@ function getJavaExecutable(javaHome) {
   return path.join(javaHome, 'bin', executable)
 }
 
-function isJava17(javaPath) {
+function isJavaMajor(javaPath, major) {
   if (!javaPath || !existsFile(javaPath)) return false
-
   try {
     const result = spawnSync(javaPath, ['-version'], { encoding: 'utf-8' })
     const output = `${result.stdout || ''}\n${result.stderr || ''}`
-    return /version "17\./.test(output)
+    return new RegExp(`version "${major}\\.`).test(output) ||
+      new RegExp(`version "${major}"`).test(output)
   } catch {
     return false
   }
@@ -235,28 +153,72 @@ function findJavaExecutables(dirPath, depth = 0) {
   }
 }
 
-function resolveJava17Path() {
+function collectWindowsJavaCandidates() {
+  if (process.platform !== 'win32') return []
+
+  const candidates = []
+  const pathEntries = String(process.env.PATH || '')
+    .split(path.delimiter)
+    .filter(Boolean)
+
+  for (const entry of pathEntries) {
+    candidates.push(path.join(entry, 'java.exe'))
+  }
+
+  try {
+    const result = spawnSync('where', ['java'], {
+      encoding: 'utf-8',
+      windowsHide: true
+    })
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`
+    for (const line of output.split(/\r?\n/)) {
+      const candidate = line.trim()
+      if (candidate.toLowerCase().endsWith('java.exe')) candidates.push(candidate)
+    }
+  } catch {
+    // PATH scanning above still covers the common case.
+  }
+
+  const programRoots = [
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs') : null
+  ].filter(Boolean)
+  const vendors = ['Eclipse Adoptium', 'AdoptOpenJDK', 'Java', 'Microsoft', 'Zulu', 'BellSoft']
+
+  for (const root of programRoots) {
+    for (const vendor of vendors) {
+      const vendorRoot = path.join(root, vendor)
+      candidates.push(...findJavaExecutables(vendorRoot, 5))
+    }
+  }
+
+  return [...new Set(candidates)]
+}
+
+function resolveSystemJavaPath(major) {
   const candidates = [
-    getJavaExecutable(process.env.JAVA_17_HOME),
-    getJavaExecutable(process.env.JDK_17_HOME),
-    getJavaExecutable(process.env.JAVA_HOME)
+    getJavaExecutable(process.env[`JAVA_${major}_HOME`]),
+    getJavaExecutable(process.env[`JDK_${major}_HOME`]),
+    getJavaExecutable(process.env.JAVA_HOME),
+    ...collectWindowsJavaCandidates()
   ].filter(Boolean)
 
   if (process.platform === 'darwin') {
     try {
-      const javaHome = spawnSync('/usr/libexec/java_home', ['-v', '17'], {
+      const javaHome = spawnSync('/usr/libexec/java_home', ['-v', String(major)], {
         encoding: 'utf-8'
       }).stdout.trim()
       candidates.unshift(getJavaExecutable(javaHome))
     } catch {
-      // Continue with the generic candidates.
+      // Continue with generic candidates.
     }
   }
 
-  return candidates.find((candidate) => isJava17(candidate)) || null
+  return candidates.find((candidate) => isJavaMajor(candidate, major)) || null
 }
 
-function resolveBundledJava17Path(root) {
+function resolveBundledJavaPath(root, major) {
   const runtimeRoot = path.join(root, 'runtime', 'java-runtime-beta')
   const candidates = [
     getJavaExecutable(runtimeRoot),
@@ -274,51 +236,96 @@ function resolveBundledJava17Path(root) {
     } catch {
       // Continue to validation below.
     }
-    if (isJava17(candidate)) return candidate
+    if (isJavaMajor(candidate, major)) return candidate
   }
 
   return null
 }
 
-async function ensureJava17Path({ root, mainWindow }) {
-  const systemJava = resolveJava17Path()
-  if (systemJava) return systemJava
-
-  const bundledJava = resolveBundledJava17Path(root)
-  if (bundledJava) return bundledJava
-
-  if (
-    typeof xmclInstaller.fetchJavaRuntimeManifest !== 'function' ||
-    typeof xmclInstaller.installJavaRuntimeTask !== 'function'
-  ) {
-    throw new Error(
-      'Java 17이 설치되어 있지 않고, 런처가 Java 런타임 설치 API를 찾지 못했습니다. Java 17을 설치한 뒤 다시 실행해주세요.'
-    )
-  }
-
+async function installWindowsJavaRuntime({ root, mainWindow, major }) {
   const destination = path.join(root, 'runtime', 'java-runtime-beta')
-  mainWindow.webContents.send('status-update', 'Java 17 런타임 다운로드 준비 중...')
-  emitInstallProgress(mainWindow, 5, 'Java 17 런타임 다운로드 준비 중...', 'JAVA')
+  const tempDestination = `${destination}.tmp-${Date.now()}`
+  const zipUrl = getAdoptiumJavaUrl(major)
 
-  const manifest = await xmclInstaller.fetchJavaRuntimeManifest({
-    target: xmclInstaller.JavaRuntimeTargetType?.Beta || 'java-runtime-beta'
-  })
+  try {
+    mainWindow.webContents.send('status-update', `Java ${major} 런타임 다운로드 중...`)
+    emitInstallProgress(mainWindow, 5, `Java ${major} 런타임 다운로드 시작`, 'JAVA')
+    const zipBuffer = await downloadToBuffer(zipUrl, (downloadPercent) => {
+      emitInstallProgress(
+        mainWindow,
+        5 + downloadPercent * 0.03,
+        `Java ${major} 다운로드 ${Math.round(downloadPercent)}%`,
+        'JAVA'
+      )
+    })
 
-  mainWindow.webContents.send('status-update', 'Java 17 런타임 다운로드 중...')
-  emitInstallProgress(mainWindow, 6, 'Java 17 런타임 다운로드 중...', 'JAVA')
-  const task = xmclInstaller.installJavaRuntimeTask({
-    destination,
-    manifest
-  })
-  await task.startAndWait()
+    mainWindow.webContents.send('status-update', `Java ${major} 런타임 압축 해제 중...`)
+    emitInstallProgress(mainWindow, 8, `Java ${major} 런타임 압축 해제 중...`, 'JAVA')
 
-  const installedJava = resolveBundledJava17Path(root)
-  if (!installedJava) {
-    throw new Error('Java 17 런타임 설치 후 java 실행 파일을 찾지 못했습니다.')
+    fs.rmSync(tempDestination, { recursive: true, force: true })
+    fs.mkdirSync(tempDestination, { recursive: true })
+
+    const zip = new AdmZip(zipBuffer)
+    const entries = zip.getEntries()
+    if (entries.length === 0) {
+      throw new Error(`Java ${major} zip 파일이 비어 있습니다.`)
+    }
+
+    const totalEntries = entries.length
+    for (let i = 0; i < entries.length; i += 1) {
+      zip.extractEntryTo(entries[i], tempDestination, true, true)
+      emitInstallProgress(
+        mainWindow,
+        8 + ((i + 1) / totalEntries) * 1,
+        `Java ${major} 압축 해제 ${Math.round(((i + 1) / totalEntries) * 100)}%`,
+        'JAVA'
+      )
+    }
+
+    const javaCandidate = findJavaExecutables(tempDestination).find((candidate) => isJavaMajor(candidate, major))
+    if (!javaCandidate) {
+      throw new Error(`다운로드한 Java ${major} 런타임에서 java.exe를 찾지 못했습니다.`)
+    }
+
+    fs.rmSync(destination, { recursive: true, force: true })
+    fs.renameSync(tempDestination, destination)
+
+    const installedJava = resolveBundledJavaPath(root, major)
+    if (!installedJava) {
+      throw new Error(`Java ${major} 런타임 설치 후 java.exe를 찾지 못했습니다.`)
+    }
+
+    emitInstallProgress(mainWindow, 9, `Java ${major} 런타임 준비 완료`, 'JAVA')
+    return installedJava
+  } catch (error) {
+    fs.rmSync(tempDestination, { recursive: true, force: true })
+    const detail = error?.message ? ` (${error.message})` : ''
+    throw new Error(`Java ${major} 런타임 설치 실패${detail}`)
+  }
+}
+
+async function ensureJavaPath({ root, mainWindow, requiredMajor }) {
+  const systemJava = resolveSystemJavaPath(requiredMajor)
+  if (systemJava) {
+    mainWindow.webContents.send('status-update', `설치된 Java ${requiredMajor} 사용`)
+    emitInstallProgress(mainWindow, 9, `설치된 Java ${requiredMajor} 사용`, 'JAVA')
+    return systemJava
   }
 
-  emitInstallProgress(mainWindow, 9, 'Java 17 런타임 준비 완료', 'JAVA')
-  return installedJava
+  const bundledJava = resolveBundledJavaPath(root, requiredMajor)
+  if (bundledJava) {
+    mainWindow.webContents.send('status-update', `런처 Java ${requiredMajor} 캐시 사용`)
+    emitInstallProgress(mainWindow, 9, `런처 Java ${requiredMajor} 캐시 사용`, 'JAVA')
+    return bundledJava
+  }
+
+  if (process.platform === 'win32') {
+    return installWindowsJavaRuntime({ root, mainWindow, major: requiredMajor })
+  }
+
+  throw new Error(
+    `Java ${requiredMajor}이(가) 필요합니다. Java ${requiredMajor}을 설치한 뒤 다시 실행해주세요.`
+  )
 }
 
 function emitInstallProgress(mainWindow, percent, message, stage = 'PREPARE') {
@@ -380,6 +387,40 @@ function clearSavedAuthToken() {
     fs.rmSync(getAuthCachePath(), { force: true })
   } catch {
     // Ignore logout cleanup errors.
+  }
+}
+
+function normalizeAuthUuid(value) {
+  return String(value || '').replace(/[^0-9a-f]/gi, '')
+}
+
+function sanitizeMclcAuth(auth) {
+  if (!auth || typeof auth !== 'object') {
+    throw new Error('Microsoft 로그인이 필요합니다.')
+  }
+
+  const meta = auth.meta && typeof auth.meta === 'object' ? auth.meta : {}
+  const accessToken = String(auth.access_token || '')
+  const uuid = normalizeAuthUuid(auth.uuid)
+  const name = String(auth.name || '')
+
+  if (!accessToken || !uuid || !name) {
+    throw new Error('Minecraft 인증 정보가 올바르지 않습니다. 로그아웃 후 다시 로그인해주세요.')
+  }
+
+  return {
+    access_token: accessToken,
+    client_token: String(auth.client_token || crypto.randomUUID()),
+    uuid,
+    name,
+    user_properties:
+      auth.user_properties && typeof auth.user_properties === 'object' ? auth.user_properties : {},
+    meta: {
+      type: ['mojang', 'msa', 'legacy'].includes(meta.type) ? meta.type : 'msa',
+      ...(meta.xuid ? { xuid: String(meta.xuid) } : {}),
+      ...(meta.demo ? { demo: Boolean(meta.demo) } : {}),
+      ...(meta.clientId ? { clientId: String(meta.clientId) } : {})
+    }
   }
 }
 
@@ -577,6 +618,7 @@ function sha256File(filePath) {
 }
 
 async function resolveFabricVersionId({ root, mcVersion, mainWindow }) {
+  const xmclInstaller = await getXmclInstaller()
   const statePath = path.join(root, STATE_FILE)
   const state = readJsonSafe(statePath, {})
   const cachedVersionId = state.fabricVersionId
@@ -625,6 +667,7 @@ function normalizeForgeVersion(mcVersion, forgeVersion) {
 }
 
 async function ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow }) {
+  const xmclInstaller = await getXmclInstaller()
   const versionJsonPath = path.join(root, 'versions', mcVersion, `${mcVersion}.json`)
   const versionJarPath = path.join(root, 'versions', mcVersion, `${mcVersion}.jar`)
 
@@ -693,6 +736,7 @@ async function ensureMinecraftVersionInstalled({ root, mcVersion, mainWindow }) 
 }
 
 async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow }) {
+  const xmclInstaller = await getXmclInstaller()
   if (typeof xmclInstaller.installForge !== 'function') {
     throw new Error(
       '@xmcl/installer에서 installForge를 찾을 수 없습니다. 패키지를 최신 상태로 설치해주세요.'
@@ -724,7 +768,7 @@ async function resolveForgeVersionId({ root, mcVersion, forgeVersion, mainWindow
   emitInstallProgress(mainWindow, 10, `Forge ${targetForge} 설치 중...`, 'FORGE')
 
   const [forgeMcVersion, ...forgeVersionParts] = targetForge.split('-')
-  const java17Path = await ensureJava17Path({ root, mainWindow })
+  const java17Path = await ensureJavaPath({ root, mainWindow, requiredMajor: 17 })
   if (java17Path) {
     mainWindow.webContents.send('status-update', `Forge ${targetForge} 설치 중... (Java 17)`)
   }
@@ -783,7 +827,10 @@ async function resolveLoaderVersionId({ root, gameConfig, mainWindow }) {
 function readBundledManifest() {
   const candidates = [
     process.env.MODPACK_MANIFEST_FILE,
+    path.join(__dirname, '../../resources/modpack-manifest.json'),
     path.join(process.cwd(), 'resources', 'modpack-manifest.json'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'resources', 'modpack-manifest.json'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'modpack-manifest.json'),
     path.join(process.resourcesPath || '', 'resources', 'modpack-manifest.json'),
     path.join(process.resourcesPath || '', 'modpack-manifest.json')
   ].filter(Boolean)
@@ -796,24 +843,63 @@ function readBundledManifest() {
   return null
 }
 
-async function loadModpackManifest(mainWindow) {
-  const manifestUrl = process.env.MODPACK_MANIFEST_URL
+function resolveManifestUrl(bundledManifest) {
+  return String(
+    process.env.MODPACK_MANIFEST_URL ||
+      bundledManifest?.manifestUrl ||
+      bundledManifest?.updates?.manifestUrl ||
+      ''
+  ).trim()
+}
+
+async function fetchRemoteManifest(manifestUrl) {
+  if (remoteManifestCache?.url === manifestUrl) return remoteManifestCache.manifest
+
+  const response = await fetch(manifestUrl)
+  if (!response.ok) {
+    throw new Error(`매니페스트 요청 실패: ${response.status} ${response.statusText}`)
+  }
+
+  const manifest = await response.json()
+  remoteManifestCache = { url: manifestUrl, manifest }
+  return manifest
+}
+
+function mergeManifestDefaults(manifest, defaults) {
+  if (!manifest || !defaults) return manifest
+  return {
+    ...defaults,
+    ...manifest,
+    game: { ...(defaults.game || {}), ...(manifest.game || {}) },
+    server: { ...(manifest.server || {}), ...(defaults.server || {}) },
+    memory: { ...(defaults.memory || {}), ...(manifest.memory || {}) },
+    economy: { ...(manifest.economy || {}), ...(defaults.economy || {}) }
+  }
+}
+
+async function loadModpackManifest(mainWindow, options = {}) {
+  const bundledManifest = readBundledManifest()
+  const manifestUrl = resolveManifestUrl(bundledManifest)
   if (!manifestUrl) {
-    const bundledManifest = readBundledManifest()
     if (bundledManifest) {
-      mainWindow.webContents.send('status-update', '내장 모드 매니페스트 사용')
+      if (!options.silent) {
+        mainWindow.webContents.send('status-update', '내장 모드 매니페스트 사용')
+      }
       return bundledManifest
     }
     return null
   }
 
-  mainWindow.webContents.send('status-update', '모드 매니페스트 확인 중...')
-  emitInstallProgress(mainWindow, 22, '모드 매니페스트 확인 중...', 'MODPACK')
-  const response = await fetch(manifestUrl)
-  if (!response.ok) {
-    throw new Error(`매니페스트 요청 실패: ${response.status} ${response.statusText}`)
+  try {
+    if (!options.silent) {
+      mainWindow.webContents.send('status-update', '모드 매니페스트 확인 중...')
+      emitInstallProgress(mainWindow, 22, '모드 매니페스트 확인 중...', 'MODPACK')
+    }
+    return mergeManifestDefaults(await fetchRemoteManifest(manifestUrl), bundledManifest)
+  } catch (error) {
+    if (bundledManifest && options.allowFallback !== false) return bundledManifest
+    throw error
   }
-  return response.json()
 }
 
 function resolveGameConfig(manifest) {
@@ -1146,8 +1232,7 @@ function parseBadges(value) {
   return 0
 }
 
-function resolveEconomyConfig() {
-  const manifest = readBundledManifest()
+function resolveEconomyConfig(manifest) {
   const economy = manifest?.economy || {}
   const balanceApiUrl = String(
     process.env.BALANCE_API_URL || economy.balanceApiUrl || economy.url || DEFAULT_BALANCE_API_URL
@@ -1172,8 +1257,11 @@ function normalizePlayerUuid(value) {
   )}-${raw.slice(20)}`
 }
 
-async function fetchNumismaticsBalance({ uuid, nickname }) {
-  const economy = resolveEconomyConfig()
+async function fetchNumismaticsBalance({ uuid, nickname, mainWindow }) {
+  const manifest = await loadModpackManifest(mainWindow, { silent: true }).catch(() =>
+    readBundledManifest()
+  )
+  const economy = resolveEconomyConfig(manifest)
   if (!economy.enabled) return { enabled: false, balance: null }
 
   const params = new URLSearchParams()
@@ -1222,8 +1310,8 @@ async function getMongoClient() {
   return mongoClientPromise
 }
 
-async function fetchPlayerSummary({ uuid, nickname }) {
-  const balanceResult = await fetchNumismaticsBalance({ uuid, nickname })
+async function fetchPlayerSummary({ uuid, nickname }, mainWindow) {
+  const balanceResult = await fetchNumismaticsBalance({ uuid, nickname, mainWindow })
   const balance = balanceResult.balance
   const season = balanceResult.season
 
@@ -1286,7 +1374,7 @@ export function setupLauncher(mainWindow) {
   async function buildLoginResult(xboxManager) {
     const token = await xboxManager.getMinecraft()
     writeSavedAuthToken(xboxManager.save(), token.profile)
-    return { success: true, profile: token.profile, mclcAuth: token.mclc() }
+    return { success: true, profile: token.profile, mclcAuth: sanitizeMclcAuth(token.mclc()) }
   }
 
   ipcMain.handle('restore-login', async () => {
@@ -1320,7 +1408,7 @@ export function setupLauncher(mainWindow) {
   })
 
   ipcMain.handle('get-player-summary', async (_, payload) => {
-    return fetchPlayerSummary(payload || {})
+    return fetchPlayerSummary(payload || {}, mainWindow)
   })
 
   // Launch Game
@@ -1329,6 +1417,7 @@ export function setupLauncher(mainWindow) {
       emitInstallProgress(mainWindow, 1, '런처 준비 중...', 'PREPARE')
       const defaultRoot = getDefaultLaunchDirectory()
       const root = launchRoot || defaultRoot
+      const authorization = sanitizeMclcAuth(mclcAuth)
 
       if (!fs.existsSync(root)) {
         fs.mkdirSync(root, { recursive: true })
@@ -1338,7 +1427,7 @@ export function setupLauncher(mainWindow) {
       const gameConfig = resolveGameConfig(manifest)
       const serverConfig = resolveServerConfig(manifest)
       const memoryConfig = resolveMemoryConfigFromSettings(manifest, settings)
-      const java17Path = await ensureJava17Path({ root, mainWindow })
+      const java17Path = await ensureJavaPath({ root, mainWindow, requiredMajor: 17 })
       const { mcVersion, versionId, loader } = await resolveLoaderVersionId({
         root,
         gameConfig,
@@ -1346,19 +1435,13 @@ export function setupLauncher(mainWindow) {
       })
       const serverAddress = formatServerAddress(serverConfig)
       applyMinecraftOptions(root, settings)
-      const waterMediaVlc = await ensureWaterMediaVlc({ root, mainWindow })
-      if (waterMediaVlc.required && !waterMediaVlc.found) {
-        throw new Error(
-          'WaterMedia 사용을 위해 VLC 설치가 필요합니다. VLC 설치 후 다시 실행해주세요.'
-        )
-      }
       await repairVersionClasspath({ root, mcVersion, versionId, mainWindow })
 
       mainWindow.webContents.send('status-update', `Minecraft 시작 중... (${serverAddress})`)
       emitInstallProgress(mainWindow, 100, '설치 준비 완료, 게임 시작', 'LAUNCH')
 
       const opts = {
-        authorization: mclcAuth,
+        authorization,
         root: root,
         ...(java17Path ? { javaPath: java17Path } : {}),
         version: {
@@ -1367,10 +1450,7 @@ export function setupLauncher(mainWindow) {
           custom: versionId
         },
         memory: memoryConfig,
-        customArgs:
-          loader === 'forge'
-            ? [...resolveForgeJvmArgs(root, versionId), ...waterMediaVlc.jvmArgs]
-            : waterMediaVlc.jvmArgs,
+        customArgs: loader === 'forge' ? resolveForgeJvmArgs(root, versionId) : [],
         quickPlay:
           serverConfig.quickConnect && settings?.autoConnect !== false
             ? {
@@ -1385,8 +1465,10 @@ export function setupLauncher(mainWindow) {
         `${mcVersion} / ${loader} 실행, 서버 접속: ${serverAddress}`
       )
 
-      launcher.launch(opts)
-
+      launcher.removeAllListeners('debug')
+      launcher.removeAllListeners('data')
+      launcher.removeAllListeners('progress')
+      launcher.removeAllListeners('close')
       launcher.on('debug', (e) => console.log(`[DEBUG] ${e}`))
       launcher.on('data', (e) => console.log(`[DATA] ${e}`))
       launcher.on('progress', (e) => {
@@ -1397,10 +1479,16 @@ export function setupLauncher(mainWindow) {
         mainWindow.webContents.send('game-closed', code)
       })
 
+      await launcher.launch(opts)
+
       return { success: true }
     } catch (error) {
       console.error('Launch error:', error)
-      return { success: false, error: error.message }
+      const errorMessage =
+        error?.message ||
+        error?.stack ||
+        (typeof error === 'string' ? error : '실행 중 알 수 없는 오류가 발생했습니다.')
+      return { success: false, error: errorMessage }
     }
   })
 }
