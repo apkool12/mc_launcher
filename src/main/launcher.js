@@ -26,8 +26,7 @@ const FORGE_JVM_ARGS = ['--add-opens=java.base/java.lang.invoke=ALL-UNNAMED']
 let remoteManifestCache = null
 
 function getAdoptiumJavaUrl(major) {
-  const arch =
-    process.arch === 'ia32' ? 'x86' : process.arch === 'arm64' ? 'aarch64' : 'x64'
+  const arch = process.arch === 'ia32' ? 'x86' : process.arch === 'arm64' ? 'aarch64' : 'x64'
   return `https://api.adoptium.net/v3/binary/latest/${major}/ga/windows/${arch}/jre/hotspot/normal/eclipse?project=jdk`
 }
 
@@ -122,8 +121,10 @@ function isJavaMajor(javaPath, major) {
   try {
     const result = spawnSync(javaPath, ['-version'], { encoding: 'utf-8' })
     const output = `${result.stdout || ''}\n${result.stderr || ''}`
-    return new RegExp(`version "${major}\\.`).test(output) ||
+    return (
+      new RegExp(`version "${major}\\.`).test(output) ||
       new RegExp(`version "${major}"`).test(output)
+    )
   } catch {
     return false
   }
@@ -282,7 +283,9 @@ async function installWindowsJavaRuntime({ root, mainWindow, major }) {
       )
     }
 
-    const javaCandidate = findJavaExecutables(tempDestination).find((candidate) => isJavaMajor(candidate, major))
+    const javaCandidate = findJavaExecutables(tempDestination).find((candidate) =>
+      isJavaMajor(candidate, major)
+    )
     if (!javaCandidate) {
       throw new Error(`다운로드한 Java ${major} 런타임에서 java.exe를 찾지 못했습니다.`)
     }
@@ -839,7 +842,12 @@ function readBundledManifest() {
     process.env.MODPACK_MANIFEST_FILE,
     path.join(__dirname, '../../resources/modpack-manifest.json'),
     path.join(process.cwd(), 'resources', 'modpack-manifest.json'),
-    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'resources', 'modpack-manifest.json'),
+    path.join(
+      process.resourcesPath || '',
+      'app.asar.unpacked',
+      'resources',
+      'modpack-manifest.json'
+    ),
     path.join(process.resourcesPath || '', 'app.asar.unpacked', 'modpack-manifest.json'),
     path.join(process.resourcesPath || '', 'resources', 'modpack-manifest.json'),
     path.join(process.resourcesPath || '', 'modpack-manifest.json')
@@ -1210,7 +1218,12 @@ async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state,
   mainWindow.webContents.send('status-update', 'Cobbleverse(.mrpack) 다운로드 중...')
   emitInstallProgress(mainWindow, 25, 'Cobbleverse(.mrpack) 다운로드 시작', 'DOWNLOAD')
   const mrpackBuffer = await downloadToBuffer(mrpack.url, (pct) => {
-    emitInstallProgress(mainWindow, 25 + pct * 0.1, `모드팩 인덱스 다운로드 ${Math.round(pct)}%`, 'DOWNLOAD')
+    emitInstallProgress(
+      mainWindow,
+      25 + pct * 0.1,
+      `모드팩 인덱스 다운로드 ${Math.round(pct)}%`,
+      'DOWNLOAD'
+    )
   })
   if (mrpack.sha512) {
     const actual = sha512Hex(mrpackBuffer)
@@ -1236,7 +1249,12 @@ async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state,
       fs.mkdirSync(path.dirname(localPath), { recursive: true })
       fs.writeFileSync(localPath, buffer)
     }
-    emitInstallProgress(mainWindow, 35 + ((i + 1) / total) * 45, `모드 설치 ${i + 1}/${total}`, 'DOWNLOAD')
+    emitInstallProgress(
+      mainWindow,
+      35 + ((i + 1) / total) * 45,
+      `모드 설치 ${i + 1}/${total}`,
+      'DOWNLOAD'
+    )
   }
 
   extractOverrides(zip, root, ['overrides', 'client-overrides'])
@@ -1351,7 +1369,9 @@ async function ensureModsSynced({ root, mainWindow }) {
 
 function resolvePlayerDataConfig(manifest) {
   const cfg = manifest?.playerData || {}
-  const url = String(process.env.PLAYER_DATA_URL || cfg.url || '').trim().replace(/\/+$/, '')
+  const url = String(process.env.PLAYER_DATA_URL || cfg.url || '')
+    .trim()
+    .replace(/\/+$/, '')
   const token = String(process.env.PLAYER_DATA_TOKEN || cfg.token || '').trim()
   return { enabled: Boolean(url), url, token }
 }
