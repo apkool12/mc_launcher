@@ -619,7 +619,7 @@ function sha256File(filePath) {
   })
 }
 
-async function resolveFabricVersionId({ root, mcVersion, mainWindow }) {
+async function resolveFabricVersionId({ root, mcVersion, mainWindow, pinnedLoader }) {
   const xmclInstaller = await getXmclInstaller()
   const statePath = path.join(root, STATE_FILE)
   const state = readJsonSafe(statePath, {})
@@ -636,7 +636,7 @@ async function resolveFabricVersionId({ root, mcVersion, mainWindow }) {
 
   mainWindow.webContents.send('status-update', 'Fabric 로더 확인 중...')
   emitInstallProgress(mainWindow, 5, 'Fabric 로더 확인 중...', 'FABRIC')
-  const fixedLoader = process.env.FABRIC_LOADER_VERSION
+  const fixedLoader = pinnedLoader || process.env.FABRIC_LOADER_VERSION
   let targetLoader = fixedLoader
 
   if (!targetLoader) {
@@ -809,7 +809,12 @@ async function resolveLoaderVersionId({ root, gameConfig, mainWindow }) {
   }
 
   if (loader === 'fabric') {
-    const versionId = await resolveFabricVersionId({ root, mcVersion, mainWindow })
+    const versionId = await resolveFabricVersionId({
+      root,
+      mcVersion,
+      mainWindow,
+      pinnedLoader: gameConfig.fabricLoaderVersion
+    })
     return { mcVersion, versionId, loader }
   }
 
@@ -921,7 +926,12 @@ function resolveGameConfig(manifest) {
       process.env.FORGE_VERSION ||
       manifest?.game?.forgeVersion ||
       manifest?.forgeVersion ||
-      DEFAULT_FORGE_VERSION
+      DEFAULT_FORGE_VERSION,
+    fabricLoaderVersion:
+      process.env.FABRIC_LOADER_VERSION ||
+      manifest?.__fabricLoaderVersion ||
+      manifest?.game?.fabricLoaderVersion ||
+      undefined
   }
 }
 
