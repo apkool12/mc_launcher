@@ -9,19 +9,32 @@ from cobble_data_api import (
 
 
 class ParsePokedexTest(unittest.TestCase):
-    def test_counts_caught_and_seen(self):
+    def test_counts_caught_and_encountered_species(self):
+        # Real shape from world/pokedex/<bucket>/<uuid>.nbt (raw, non-gzip NBT).
         data = {
-            "pokedex": {
-                "species": [
-                    {"id": "pidgey", "knowledge": "caught"},
-                    {"id": "rattata", "knowledge": "SEEN"},
-                    {"id": "unrelated", "notKnowledge": "ignored"},
-                ],
-                "nested": {"deeper": {"knowledge": 123}},
-            }
+            "speciesRecords": {
+                "cobblemon:pikachu": {
+                    "formRecords": {"normal": {"knowledge": "CAUGHT"}}
+                },
+                "cobblemon:illumise": {
+                    "formRecords": {"normal": {"knowledge": "ENCOUNTERED"}}
+                },
+                "cobblemon:zorua": {
+                    "formRecords": {"normal": {"knowledge": "CAUGHT"}}
+                },
+            },
+            "uuid": "5909375a-a704-40a6-b58b-8033b1e10a27",
         }
         result = parse_pokedex(data)
-        self.assertEqual(result, {"caught": 1, "seen": 2, "total": 1025})
+        self.assertEqual(result, {"caught": 2, "seen": 3, "total": 1025})
+
+    def test_species_with_no_form_records_not_counted(self):
+        data = {"speciesRecords": {"cobblemon:eevee": {"formRecords": {}}}}
+        result = parse_pokedex(data)
+        self.assertEqual(result, {"caught": 0, "seen": 0, "total": 1025})
+
+    def test_none_data_returns_zeros(self):
+        self.assertEqual(parse_pokedex(None), {"caught": 0, "seen": 0, "total": 1025})
 
 
 class ParseBadgesFromNbtTest(unittest.TestCase):

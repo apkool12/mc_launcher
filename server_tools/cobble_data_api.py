@@ -143,29 +143,35 @@ def _dashed_uuid(raw):
     return str(uuid.UUID(hex=hex_only))
 
 
-def _iter_knowledge(node):
-    """Depth-first walk of a JSON-like structure, yielding each `knowledge` string field found."""
-    if isinstance(node, dict):
-        value = node.get("knowledge")
-        if isinstance(value, str):
-            yield value
-        for child in node.values():
-            yield from _iter_knowledge(child)
-    elif isinstance(node, list):
-        for child in node:
-            yield from _iter_knowledge(child)
-
-
 def parse_pokedex(data):
+    """Parse a Cobblemon world/pokedex/<bucket>/<uuid>.nbt structure (raw, non-gzip NBT).
+
+    Real shape confirmed against live server data:
+      { "speciesRecords": { "cobblemon:<species>": { "formRecords": {
+          "<form>": { "knowledge": "CAUGHT" | "ENCOUNTERED", ... } } } }, "uuid": "..." }
+    A species counts as "seen" once it has any form record at all; "caught" requires
+    at least one form record with knowledge == CAUGHT.
+    """
+    species_records = (data or {}).get("speciesRecords", {})
+    if not isinstance(species_records, dict):
+        return {"caught": 0, "seen": 0, "total": POKEDEX_TOTAL}
+
     caught = 0
     seen = 0
-    for knowledge in _iter_knowledge(data):
-        upper = knowledge.upper()
-        if upper == "CAUGHT":
+    for record in species_records.values():
+        form_records = record.get("formRecords", {}) if isinstance(record, dict) else {}
+        if not isinstance(form_records, dict) or not form_records:
+            continue
+        knowledges = {
+            fr.get("knowledge")
+            for fr in form_records.values()
+            if isinstance(fr, dict) and isinstance(fr.get("knowledge"), str)
+        }
+        if not knowledges:
+            continue
+        seen += 1
+        if "CAUGHT" in knowledges:
             caught += 1
-            seen += 1
-        elif upper == "SEEN":
-            seen += 1
     return {"caught": caught, "seen": seen, "total": POKEDEX_TOTAL}
 
 
@@ -175,17 +181,17 @@ def read_pokedex(player_uuid):
         return parse_pokedex(None)
 
     prefix = dashed[:2]
-    candidate = WORLD / "cobblemonplayerdata" / prefix / f"{dashed}.json"
+    candidate = WORLD / "pokedex" / prefix / f"{dashed}.nbt"
     try:
-        data = json.loads(candidate.read_text())
+        data = NbtReader(candidate.read_bytes()).named_root()
         return parse_pokedex(data)
     except Exception:
         pass
 
     try:
-        for path in (WORLD / "cobblemonplayerdata").glob(f"*/{dashed}.json"):
+        for path in (WORLD / "pokedex").glob(f"*/{dashed}.nbt"):
             try:
-                data = json.loads(path.read_text())
+                data = NbtReader(path.read_bytes()).named_root()
                 return parse_pokedex(data)
             except Exception:
                 continue
@@ -262,9 +268,8 @@ def _find_cobbledollars_balance_json(data):
 
 
 def read_cobbledollars(player_uuid, player_nbt=None):
-    # NOTE: exact storage format is unconfirmed (no player data existed at build
-    # time). Both branches below are best-effort and should be verified against
-    # real server data once a player has played and earned cobbledollars.
+    # Confirmed against live server data: world/cobbledollarsplayerdata/<uuid>.json
+    # is a flat { "name": ..., "cobbledollars": <int> } file (no bucket subfolder).
     dashed = _dashed_uuid(player_uuid)
     if not dashed:
         return {"balance": 0}
