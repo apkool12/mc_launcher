@@ -106,6 +106,14 @@ function init() {
   progressStage.textContent = 'PREPARE'
   hydrateLauncherSettings()
   restoreLogin()
+
+  window.api.onUpdateReady(() => {
+    showModal({
+      title: '업데이트 준비 완료',
+      message: '새 버전이 다운로드되었습니다. 런처를 재시작하면 적용됩니다.',
+      variant: 'success'
+    })
+  })
 }
 
 function clampNumber(value, min, max, fallback) {

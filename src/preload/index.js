@@ -31,6 +31,10 @@ const api = {
   onServerStatus: (callback) => {
     ipcRenderer.removeAllListeners('server-status')
     ipcRenderer.on('server-status', (_, online) => callback(online))
+  },
+  onUpdateReady: (callback) => {
+    ipcRenderer.removeAllListeners('update-ready')
+    ipcRenderer.on('update-ready', () => callback())
   }
 }
 

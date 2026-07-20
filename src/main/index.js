@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, normalize } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
 import { setupLauncher } from './launcher'
 import { pingServer } from './serverPing'
@@ -204,6 +205,7 @@ function createWindow() {
     mainWindow.show()
     // Start server status check after window is ready
     startServerStatusLoop(mainWindow)
+    setupAutoUpdater(mainWindow)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -219,6 +221,27 @@ function createWindow() {
 
   setupLauncher(mainWindow)
   registerLaunchPathIpc(mainWindow)
+}
+
+// ===== Auto Update (Windows only — see README on macOS constraints) =====
+function setupAutoUpdater(window) {
+  if (process.platform !== 'win32' || !app.isPackaged) return
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-downloaded', () => {
+    if (window.isDestroyed()) return
+    window.webContents.send('update-ready')
+  })
+
+  autoUpdater.on('error', (error) => {
+    console.error('Auto update error:', error)
+  })
+
+  autoUpdater.checkForUpdates().catch((error) => {
+    console.error('Auto update check failed:', error)
+  })
 }
 
 // ===== Server Status Check Logic =====

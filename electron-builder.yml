@@ -38,6 +38,5 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: github
-  owner: apkool12
-  repo: mc_launcher
+  provider: generic
+  url: http://161.33.22.158:8765/downloads/

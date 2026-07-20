@@ -1,6 +1,6 @@
 {
   "name": "bytemc-launcher",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "ByteMC Minecraft launcher",
   "main": "./out/main/index.js",
   "author": "apkool12",
@@ -30,6 +30,7 @@
     "@xmcl/net": "^1.0.5",
     "adm-zip": "^0.5.17",
     "axios": "^1.14.0",
+    "electron-updater": "^6.8.9",
     "minecraft-launcher-core": "^3.18.2",
     "msmc": "^5.0.5"
   },
