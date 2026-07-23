@@ -16,6 +16,7 @@ let xmclInstallerPromise = null
 const STATE_FILE = '.launcher-state.json'
 const MODPACK_READY_FILE = '.modpack-ready.json'
 const AUTH_CACHE_FILE = 'minecraft-auth-cache.json'
+const OFFLINE_CACHE_FILE = 'offline-login-cache.json'
 const DEFAULT_MC_VERSION = '1.20.1'
 const DEFAULT_LOADER = 'forge'
 const DEFAULT_FORGE_VERSION = '47.4.0'
@@ -398,8 +399,42 @@ function clearSavedAuthToken() {
   }
 }
 
+function getOfflineCachePath() {
+  return path.join(app.getPath('userData'), OFFLINE_CACHE_FILE)
+}
+
+function readSavedOfflineUsername() {
+  try {
+    const cachePath = getOfflineCachePath()
+    if (!fs.existsSync(cachePath)) return null
+    const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'))
+    return typeof cache.username === 'string' ? cache.username : null
+  } catch {
+    return null
+  }
+}
+
+function writeSavedOfflineUsername(username) {
+  writeJsonSafe(getOfflineCachePath(), { username, savedAt: new Date().toISOString() })
+}
+
+function clearSavedOfflineUsername() {
+  try {
+    fs.rmSync(getOfflineCachePath(), { force: true })
+  } catch {
+    // Ignore logout cleanup errors.
+  }
+}
+
 function normalizeAuthUuid(value) {
   return String(value || '').replace(/[^0-9a-f]/gi, '')
+}
+
+function offlinePlayerUuid(username) {
+  const hash = crypto.createHash('md5').update(`OfflinePlayer:${username}`, 'utf-8').digest()
+  hash[6] = (hash[6] & 0x0f) | 0x30
+  hash[8] = (hash[8] & 0x3f) | 0x80
+  return hash.toString('hex')
 }
 
 function sanitizeMclcAuth(auth) {
@@ -1185,15 +1220,42 @@ function safeJoin(root, relPath) {
   return target
 }
 
-function extractOverrides(zip, root, folders) {
+function writeFileWithRetry(target, data, attempts = 5) {
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      if (existsFile(target)) {
+        try {
+          fs.chmodSync(target, 0o666)
+        } catch {
+          // Ignore chmod failures; the write below will surface any real issue.
+        }
+      }
+      fs.writeFileSync(target, data)
+      return
+    } catch (error) {
+      if (i === attempts - 1 || (error.code !== 'EPERM' && error.code !== 'EBUSY')) throw error
+      const delayMs = 150 * (i + 1)
+      const until = Date.now() + delayMs
+      while (Date.now() < until) {
+        /* brief synchronous backoff before retrying a locked file */
+      }
+    }
+  }
+}
+
+function extractOverrides(zip, root, folders, skipPaths = []) {
+  const skipSet = new Set(skipPaths)
   for (const folder of folders) {
     const prefix = `${folder}/`
     for (const entry of zip.getEntries()) {
       if (entry.isDirectory || !entry.entryName.startsWith(prefix)) continue
       const rel = entry.entryName.slice(prefix.length)
+      if (skipSet.has(rel)) continue
       const target = safeJoin(root, rel)
+      const data = entry.getData()
+      if (existsFile(target) && sha512Hex(fs.readFileSync(target)) === sha512Hex(data)) continue
       fs.mkdirSync(path.dirname(target), { recursive: true })
-      fs.writeFileSync(target, entry.getData())
+      writeFileWithRetry(target, data)
     }
   }
 }
@@ -1232,12 +1294,18 @@ async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state,
 
   const ready = readModpackReady(root)
   const extraModsList = Array.isArray(manifest.extraMods) ? manifest.extraMods : []
+  const removeModsList = Array.isArray(manifest.removeMods) ? manifest.removeMods : []
+  const skipOverridePathsList = Array.isArray(manifest.skipOverridePaths)
+    ? manifest.skipOverridePaths
+    : []
   const alreadyInstalled =
     ready?.mode === 'mrpack' &&
     String(ready.version || '') === targetVersion &&
     Array.isArray(ready.installedPaths) &&
     ready.installedPaths.every((p) => existsFile(path.join(root, p))) &&
-    extraModsList.every((m) => m?.path && existsFile(path.join(root, m.path)))
+    extraModsList.every((m) => m?.path && existsFile(path.join(root, m.path))) &&
+    removeModsList.every((p) => !existsFile(path.join(root, p))) &&
+    skipOverridePathsList.every((p) => !existsFile(path.join(root, p)))
 
   if (alreadyInstalled && hasJarMods(root)) {
     mainWindow.webContents.send('status-update', `모드팩 캐시 사용 (${targetVersion})`)
@@ -1288,7 +1356,9 @@ async function syncMrpackPackage({ root, mainWindow, manifest, statePath, state,
     )
   }
 
-  extractOverrides(zip, root, ['overrides', 'client-overrides'])
+  extractOverrides(zip, root, ['overrides', 'client-overrides'], skipOverridePathsList)
+
+  for (const rel of removeModsList) fs.rmSync(path.join(root, rel), { force: true })
 
   const extraPaths = await installExtraMods({ root, mainWindow, extraMods: manifest.extraMods })
 
@@ -1400,7 +1470,7 @@ async function ensureModsSynced({ root, mainWindow }) {
   return manifest
 }
 
-function resolvePlayerDataConfig(manifest) {
+export function resolvePlayerDataConfig(manifest) {
   const cfg = manifest?.playerData || {}
   const url = String(process.env.PLAYER_DATA_URL || cfg.url || '')
     .trim()
@@ -1476,8 +1546,50 @@ export function setupLauncher(mainWindow) {
     }
   })
 
+  function buildOfflineLoginResult(name) {
+    const profile = { name }
+    const mclcAuth = sanitizeMclcAuth({
+      access_token: crypto.randomUUID(),
+      client_token: crypto.randomUUID(),
+      uuid: offlinePlayerUuid(name),
+      name,
+      meta: { type: 'mojang' }
+    })
+    return { success: true, profile, mclcAuth }
+  }
+
+  // Offline Login (no Microsoft account required)
+  ipcMain.handle('offline-login', async (_, username) => {
+    try {
+      const name = String(username || '').trim()
+      if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) {
+        throw new Error('닉네임은 영문/숫자/밑줄(_) 3~16자여야 합니다.')
+      }
+
+      const result = buildOfflineLoginResult(name)
+      writeSavedOfflineUsername(name)
+      return result
+    } catch (error) {
+      console.error('Offline login error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('restore-offline-login', async () => {
+    try {
+      const name = readSavedOfflineUsername()
+      if (!name) return { success: false, needsLogin: true }
+      return buildOfflineLoginResult(name)
+    } catch (error) {
+      console.error('Restore offline login error:', error)
+      clearSavedOfflineUsername()
+      return { success: false, needsLogin: true, error: error.message }
+    }
+  })
+
   ipcMain.handle('logout', async () => {
     clearSavedAuthToken()
+    clearSavedOfflineUsername()
     return { success: true }
   })
 
@@ -1523,6 +1635,9 @@ export function setupLauncher(mainWindow) {
           number: mcVersion,
           type: 'release',
           custom: versionId
+        },
+        overrides: {
+          versionJson: path.join(root, 'versions', versionId, `${versionId}.json`)
         },
         memory: memoryConfig,
         customArgs: loader === 'forge' ? resolveForgeJvmArgs(root, versionId) : [],

@@ -5,10 +5,13 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   restoreLogin: () => ipcRenderer.invoke('restore-login'),
   msLogin: () => ipcRenderer.invoke('ms-login'),
+  offlineLogin: (username) => ipcRenderer.invoke('offline-login', username),
+  restoreOfflineLogin: () => ipcRenderer.invoke('restore-offline-login'),
   logout: () => ipcRenderer.invoke('logout'),
   getPlayerSummary: (args) => ipcRenderer.invoke('get-player-summary', args),
   getLauncherSettings: () => ipcRenderer.invoke('get-launcher-settings'),
   saveLauncherSettings: (settings) => ipcRenderer.invoke('save-launcher-settings', settings),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getLaunchDirectory: () => ipcRenderer.invoke('get-launch-directory'),
   chooseLaunchDirectory: () => ipcRenderer.invoke('choose-launch-directory'),
   launchGame: (args) => ipcRenderer.invoke('launch-game', args),
@@ -32,9 +35,14 @@ const api = {
     ipcRenderer.removeAllListeners('server-status')
     ipcRenderer.on('server-status', (_, online) => callback(online))
   },
+  restartAndInstall: () => ipcRenderer.invoke('restart-and-install'),
   onUpdateReady: (callback) => {
     ipcRenderer.removeAllListeners('update-ready')
     ipcRenderer.on('update-ready', () => callback())
+  },
+  onUpdateStatus: (callback) => {
+    ipcRenderer.removeAllListeners('update-status')
+    ipcRenderer.on('update-status', (_, status) => callback(status))
   }
 }
 

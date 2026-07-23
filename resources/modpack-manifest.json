@@ -1,6 +1,6 @@
 {
-  "version": "cobbleverse-1.7.41b",
-  "generatedAt": "2026-07-17T00:00:00.000Z",
+  "version": "cobbleverse-1.7.42",
+  "generatedAt": "2026-07-23T03:15:00.000Z",
   "game": {
     "minecraftVersion": "1.21.1",
     "loader": "fabric"
@@ -15,10 +15,17 @@
     "max": "6G"
   },
   "mrpack": {
-    "url": "https://cdn.modrinth.com/data/Jkb29YJU/versions/T9GJwPoJ/COBBLEVERSE%201.7.41b.mrpack",
-    "version": "1.7.41b",
-    "sha512": "d9669e1d99db2645c6540bcab60ac0454e97a1f7c466454651a386dc0fdbf6c7aa796e8cc747707377745adaf6e085da0d57af35a350220515544aa2ffb87f81"
+    "url": "https://cdn.modrinth.com/data/Jkb29YJU/versions/4SKGla61/COBBLEVERSE%201.7.42.mrpack",
+    "version": "1.7.42",
+    "sha512": "9af64e0d3a092ab8d72d966cc4d45512e8d875685e804bea9233adb88f5f5d4c30578b77304f70fe77e9ef2ee01e487d652f3341279bcc1850ff2587ae8aa8a4"
   },
+  "removeMods": [
+    "mods/cobblemonintegrations-fabric-1.21.1-1.1.6.jar",
+    "mods/cobblemonintegrations-fabric-1.21.1-1.1.7.jar",
+    "mods/cobblemonintegrations-fabric-1.21.1-1.1.8.jar",
+    "config/euphoria_patcher/.data.json"
+  ],
+  "skipOverridePaths": ["config/euphoria_patcher/.data.json"],
   "extraMods": [
     {
       "path": "mods/voicechat-fabric-1.21.1-2.6.20.jar",
@@ -29,6 +36,166 @@
       "path": "mods/cobblebrain-fabric-1.3.1.jar",
       "url": "https://cdn.modrinth.com/data/YSqiXLE3/versions/qOFKmLqs/cobblebrain-fabric-1.3.1.jar",
       "sha512": "fda59e76aca95542a7794d7c9fba961ef6866b1bd4e07bd47978f7133a62f33ad5613195533f026ccad2aa3eb497fecd242811649f352181e6a6116147ca2fed"
+    },
+    {
+      "path": "mods/essential_commands-0.35.2-mc1.21.jar",
+      "url": "https://cdn.modrinth.com/data/6VdDUivB/versions/kev3hDqV/essential_commands-0.35.2-mc1.21.jar",
+      "sha512": "02fb11a58df14955b87c7e686832922e8e977458bf3c159f25d0ddd423f220610a2b8f6bf140810a56c1660c43340b827accffbeb0fd65ea96f52e587a3f1813"
+    },
+    {
+      "path": "mods/CobblemonBroadcaster-1.2.5+1.21.1.jar",
+      "url": "https://cdn.modrinth.com/data/E96uokEJ/versions/7euovQHx/CobblemonBroadcaster-1.2.5%2B1.21.1.jar",
+      "sha512": "9b2829134a71a791de9a8a29f33f2f9a5afc0b647f96c367d20f02851deff68c255911e8a98706e7e675d3edb36a5d96121a5e7b18469df929c481001f4ae01d"
+    },
+    {
+      "path": "mods/open-parties-and-claims-fabric-1.21.1-0.27.8.jar",
+      "url": "https://cdn.modrinth.com/data/gF3BGWvG/versions/cNfQARzn/open-parties-and-claims-fabric-1.21.1-0.27.8.jar",
+      "sha512": "3bca2f2d53ff3c49243bf91db48c5ef8ce822c1b85e4ff5bdebfeee389d3d32649c6874e50ab02838c60f64e2ee910fbd6e91436e1b1cea2462949a8dabf489d"
+    },
+    {
+      "path": "mods/cobblemonintegrations-fabric-1.21.1-1.1.9.jar",
+      "url": "http://161.33.22.158:8765/downloads/cobblemonintegrations-fabric-1.21.1-1.1.9.jar",
+      "sha512": "6edb4f7cd238588d82a1673189b4ff033e738f551636bf12ae82798481ac6345aafbbceb614d7178cc50c22710c5f9adcba04939d611d63cc077420618500f8e"
+    },
+    {
+      "path": "mods/cobblemonalphas-1.4.1.jar",
+      "url": "https://cdn.modrinth.com/data/QnWyhFGf/versions/wVSPSTdd/cobblemonalphas-1.4.1.jar",
+      "sha512": "5404c8d8cb19f09b562169d5deef0afca7318409e87e41ca3a1848ff69b46c18fd2bdc2b187049234405bafda60c87f10204e6fc59018e61c951236faf8d7172"
+    },
+    {
+      "path": "mods/veinminer-fabric-2.4.2.jar",
+      "url": "https://cdn.modrinth.com/data/OhduvhIc/versions/1NZqjOaM/veinminer-fabric-2.4.2.jar",
+      "sha512": "44143f84a1e109ff0b4f29c8a739e452f2390e9b51f5a6bf6bc48acd3bc970b5db61c44c6c3115c85ddaa7efe88a00f73fa1aa4a18ebc411359938989be0c476"
+    },
+    {
+      "path": "mods/silk-all-1.10.7.jar",
+      "url": "https://cdn.modrinth.com/data/aTaCgKLW/versions/jrC1TCfF/silk-all-1.10.7.jar",
+      "sha512": "5acc9096ecd7fe0764a29f81c8aa700bd4607b928bd2afa5531cba34899b30887af21743d1a8737b60716dfe44fdf14559c4e6a339654637913df55086576c2d"
+    },
+    {
+      "path": "mods/fabrictailor-2.5.0.jar",
+      "url": "https://cdn.modrinth.com/data/g8w1NapE/versions/UDZdkBPN/fabrictailor-2.5.0.jar",
+      "sha512": "df73fb7a9c8c54c12dda30cb1a7479e324a3ed8e0d4d5553f746e73760433bee4f56048d56236b372675364f1e5e4569fd9ff34a9ba7940f634387ad2d2bf0f8"
+    },
+    {
+      "path": "mods/caramelChat-mc1.21.1-fabric-1.2.2.jar",
+      "url": "https://cdn.modrinth.com/data/M4vJe1FJ/versions/DThCgWlO/caramelChat-mc1.21.1-fabric-1.2.2.jar",
+      "sha512": "796a5fb6dace2458f72495ceb9f22c7d7fcdffb294cd5058b0f5623e8dbb0ec27f4f14d72e62443d0aefeb93c19e2f35e239559cc36212f0db3eb14550c0449d"
+    },
+    {
+      "path": "mods/lootr-fabric-1.21.1-1.11.37.122.jar",
+      "url": "https://cdn.modrinth.com/data/EltpO5cN/versions/uapIrG9e/lootr-fabric-1.21.1-1.11.37.122.jar",
+      "sha512": "9db64be7eb95c4b9fc7b8b83abbc1309a408c44e3fa97a49e791d3e425f0efebbc92587328f38ac35b19de92c4f2c97eb20f1f5e125d253e04fb99c2d2f66121"
+    },
+    {
+      "path": "mods/rbrctai-fabric-1.21.1-0.15.3-beta.jar",
+      "url": "https://cdn.modrinth.com/data/KWljXemF/versions/75X3BE96/rbrctai-fabric-1.21.1-0.15.3-beta.jar",
+      "sha512": "9fb0222bb1e28d6da3c51db815083452eae20bb63f133cfa1d559a540e52355eeee33a570a839c330c30fb415fd209be94d630fad8e2068b640240b4ff86c3d6"
+    },
+    {
+      "path": "mods/wild_battle_api-fabric-1.1.2.jar",
+      "url": "https://cdn.modrinth.com/data/v7VZE8kh/versions/GoEGm1Ea/wild_battle_api-fabric-1.1.2.jar",
+      "sha512": "1154c26f932ff8a2db09c6698a182e0ca0aa290a8a319c873e6f118ef482c20dd130c41426a63f36787d785fe9574bd52517f0053160f977b13faa49852ef56e"
+    },
+    {
+      "path": "mods/cobblemon_battle_tower-fabric-1.10.22.jar",
+      "url": "https://cdn.modrinth.com/data/v19DG9nW/versions/PkRUcN3J/cobblemon_battle_tower-fabric-1.10.22.jar",
+      "sha512": "20616890daa978ca47c51ab46a51104ac6d44b0daeb99420c4447a2f1f404b2e9fa26848900a941b480abf1edebe24626d609356699bb65db4f81d5188a13d41"
+    },
+    {
+      "path": "mods/craft-enchanted-golden-apples-48.1.jar",
+      "url": "https://cdn.modrinth.com/data/y9Y3cP68/versions/5MqF1DnY/craft-enchanted-golden-apples-48.1.jar",
+      "sha512": "71a9714b3cf5e55caf9118b0679d729a0d9055fdc3a97e66bd67a681f8279017ee7951db578fd33b09a5dfa21423e00e20cf5c7bb355560e00acb6c0be08f860"
+    },
+    {
+      "path": "mods/cobblemon-economy-0.0.17.jar",
+      "url": "https://cdn.modrinth.com/data/zfVCrbFk/versions/CfJu3YAf/cobblemon-economy-0.0.17.jar",
+      "sha512": "bae8cd1e776f42262c94b2e866688d48d83449585cd0631c77233bce474b4597f1a4ffc36ea45f57e82b2437af3c34c2de72fc175d2e27f05adde9311f67ac02"
+    },
+    {
+      "path": "mods/numismatic-overhaul-0.3.5+1.21.jar",
+      "url": "https://cdn.modrinth.com/data/ZXm8hVxN/versions/Ls16xJ6W/numismatic-overhaul-0.3.5%2B1.21.jar",
+      "sha512": "af67e51f2c3d891bcd9d209411a434c6190c5c63c29af1e73af26286cdf3791b774a4ed9484b42657d7134640cca6afe55b82245b2472f16d9585b1b1fb4fdf8"
+    },
+    {
+      "path": "mods/pokemon-buyback-npcs-0.1.0.jar",
+      "url": "http://161.33.22.158:8765/downloads/pokemon-buyback-npcs-0.1.0.jar",
+      "sha512": "163e251b682553ae4a884b81111eb4a12a0938403f94bbef8f8635749bf5baa67121304ec68be85be74518f9861352f804c4f62a331285cc1ee250d87a06c99a"
+    },
+    {
+      "path": "mods/cobblemon-trainer-structures-1.7.1.jar",
+      "url": "http://161.33.22.158:8765/downloads/cobblemon-trainer-structures-1.7.1.jar",
+      "sha512": "c00a54acdf70261f531a37c6c37722323384836bd23147eacead4f646209bd90b2308d9537b1865ba71397d36254185743fb9d0f589416d22d6faf9364209f32"
+    },
+    {
+      "path": "mods/cobblemon-size-variations-1.4.0.jar",
+      "url": "http://161.33.22.158:8765/downloads/cobblemon-size-variations-1.4.0.jar",
+      "sha512": "2cfdc38d4a9bb41b0bc5b7950291e22d53a4b62b492bdf838b9482fb0f4a95a84463e9facff37cdba7aa9c9ba6ae391a315368d41152d7d73ebf03d497a8b337"
+    },
+    {
+      "path": "mods/polymorph-1.1.0-fabric-1.21.1.jar",
+      "url": "http://161.33.22.158:8765/downloads/polymorph-1.1.0-fabric-1.21.1.jar",
+      "sha512": "701cbff45976dcc5e8c480582fdcfaf20565d17b763a091e551debd343c37430cd711844d3d11b3f1abb236cca56ae907045b64c6ac5f70553aaa98e4fb69527"
+    },
+    {
+      "path": "mods/scalablelux-0.3.0-alpha.0.5-fabric-1.21.1.jar",
+      "url": "http://161.33.22.158:8765/downloads/scalablelux-0.3.0-alpha.0.5-fabric-1.21.1.jar",
+      "sha512": "a15a9d52f186dff23044c913f827b44c5ba223f6b3c4fda52805d2f7ebd8f07741d5ede79fbc5bc2856676b1fcf368c1620347c03fd1773159eda234ec05437f"
+    },
+    {
+      "path": "mods/chunky-1.4.23-fabric.jar",
+      "url": "http://161.33.22.158:8765/downloads/chunky-1.4.23-fabric.jar",
+      "sha512": "02ca6af1ed31e9ebc51af20948a2afb670fe653c80aaeb990947caf6b655d6ab8eda3f1b64ef478633b67ef5d2fd0d1fe67e2107a4a522ef45fd1f183c9a6c9c"
+    },
+    {
+      "path": "mods/spark-1.10.109-fabric.jar",
+      "url": "http://161.33.22.158:8765/downloads/spark-1.10.109-fabric.jar",
+      "sha512": "367f574f6d28432067f09737577d799ced9c309c1725da1d09ffdfe10eacf461a66967205cc938131afbcc8b8255c8c25f8aa516e15f061c6481b6e7b8c94250"
+    },
+    {
+      "path": "mods/jade-1.21.1-fabric-15.10.5.jar",
+      "url": "https://cdn.modrinth.com/data/nvQzSEkH/versions/5Sbkzz4O/Jade-1.21.1-Fabric-15.10.5.jar",
+      "sha512": "14b8ff98fc964d31a650e953fca7b4dcef07b976195a8061b8258469a227bd990205cf3682ccf6ad0e5243258d4be46def7deff6fed0434c136d189cdccf184a"
+    },
+    {
+      "path": "mods/cobblemon-detail-viewer-1.6.3.jar",
+      "url": "https://cdn.modrinth.com/data/qHpht0Ug/versions/QVNfpdFs/cobblemon-detail-viewer-1.6.3.jar",
+      "sha512": "d6bfc1e4c07304a3bf5fc661fac9c47699530206af6b5bb26484a673da712c2465a29e4f689463e4e01fc38532ae70803afd7bff6abae722c0528480284c64a2"
+    },
+    {
+      "path": "mods/Auction-House-Cobb-1.8.0.jar",
+      "url": "http://161.33.22.158:8765/downloads/Auction-House-Cobb-1.8.0.jar",
+      "sha512": "804c2cd1656cc9a8fa35679a5ec7dee02c447a3145a9988baa20d6ea5e0f69cda7617c5cfcffb6284180b7434acc77d12fbfbd66067cd0d66fda0d0daf647cf5"
+    },
+    {
+      "path": "mods/cobblemon-occupied-pokeballs-1.2.1.jar",
+      "url": "http://161.33.22.158:8765/downloads/cobblemon-occupied-pokeballs-1.2.1.jar",
+      "sha512": "127bb9df3a77b3745c7fbf9355cfdb0ac996f449a43675b9a9ee828f848b162154a45479776b9ca4a2266d195fd76c1ca41cbd417503045e03025ea8a186495b"
+    },
+    {
+      "path": "mods/CobbleAnalyzerFabric-1.7.3-1.1.1.jar",
+      "url": "http://161.33.22.158:8765/downloads/CobbleAnalyzerFabric-1.7.3-1.1.1.jar",
+      "sha512": "77bac5ecb12e5601cc848fcd4dcabbb5ea0c68b5f519432735f386350dd29c90e7c0e530c8c84ab4544df66df910619ba109c0dc0962e301bada46842dcfd7ff"
+    },
+    {
+      "path": "mods/cobblenav-fabric-2.3.3.jar",
+      "url": "http://161.33.22.158:8765/downloads/cobblenav-fabric-2.3.3.jar",
+      "sha512": "0d2efd2f8beebf8b9ed7f628ac6343792ec50945c5a1d9de06a5b2c2a9255a9897f4bfb7ea5f14765977400708efb4b511cfb1c8bf4e967100e54e88d98c720e"
+    },
+    {
+      "path": "mods/BOMD-1.10.2-1.21.1.jar",
+      "url": "http://161.33.22.158:8765/downloads/BOMD-1.10.2-1.21.1.jar",
+      "sha512": "64e434b0841d594857191eeed066927f3ade0cd71e39e458fffe3208096398123745de57d1e9fce24842496559cb4614e58f34f85201df093647e20dc41dff8f"
+    },
+    {
+      "path": "mods/cardinal-components-api-6.1.3.jar",
+      "url": "http://161.33.22.158:8765/downloads/cardinal-components-api-6.1.3.jar",
+      "sha512": "db52fc8c4f14dda723b69eec5a52a693fcb1db72e97114cb530ac8a306d95c13a4234ea54bc6e632134038cb05ba551b5240b9187562fb775a4c7bacb681eff1"
+    },
+    {
+      "path": "mods/cobblemon_dailies-fabric-1.21.1-2.3.0.jar",
+      "url": "http://161.33.22.158:8765/downloads/cobblemon_dailies-fabric-1.21.1-2.3.0.jar",
+      "sha512": "0328d31f5db0fa3da3030769b97ff7c8025093d16fbe09cafd87953a1b126aacd8658984409dc5e82ad72cbe848c754740552cea5ec2c7f1ecf360b9628d24ee"
     }
   ],
   "playerData": {

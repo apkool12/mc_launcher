@@ -27,6 +27,7 @@ DOWNLOAD_DIR = Path(
 
 WORLD = SERVER_ROOT / LEVEL_NAME
 USERCACHE_FILE = SERVER_ROOT / "usercache.json"
+MAINTENANCE_FLAG = SERVER_ROOT / "MAINTENANCE"
 
 POKEDEX_TOTAL = 1025
 
@@ -426,7 +427,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/health":
-            self.send_json(200, {"ok": True})
+            self.send_json(200, {"ok": True, "maintenance": MAINTENANCE_FLAG.is_file()})
             return
 
         if parsed.path != "/player":

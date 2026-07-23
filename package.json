@@ -1,6 +1,6 @@
 {
   "name": "bytemc-launcher",
-  "version": "1.0.7",
+  "version": "1.0.26",
   "description": "ByteMC Minecraft launcher",
   "main": "./out/main/index.js",
   "author": "apkool12",

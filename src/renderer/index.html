@@ -19,6 +19,7 @@
         <div class="top-left animate-pop">
           <h1 class="title">대컴공 빌리지</h1>
           <p class="subtitle">[Byte] Sunlit Cobblemon Server</p>
+          <p class="update-status-badge hidden" id="update-status-badge"></p>
         </div>
 
         <div class="top-right hidden animate-pop" id="user-area">
@@ -73,6 +74,13 @@
             />
           </svg>
         </button>
+        <button class="icon-btn animate-pop" id="btn-patchnotes" title="패치내역" style="--d: 0.25s">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"
+            />
+          </svg>
+        </button>
         <button class="icon-btn animate-pop" id="btn-discord" title="커뮤니티" style="--d: 0.3s">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path
@@ -101,9 +109,27 @@
           </div>
 
           <div class="play-group">
-            <button id="btn-login" class="action-btn login-mode animate-pop" style="--d: 0.6s">
-              <span>LOGIN</span>
-            </button>
+            <div class="account-choice animate-pop" id="account-choice" style="--d: 0.6s">
+              <p class="account-choice-question">계정이 있나요?</p>
+              <div class="account-choice-buttons">
+                <button id="btn-login" class="action-btn login-mode">
+                  <span>예</span>
+                </button>
+                <button id="btn-offline-toggle" class="action-btn offline-mode">
+                  <span>아니요</span>
+                </button>
+              </div>
+              <div class="offline-login-row hidden" id="offline-login-row">
+                <input
+                  type="text"
+                  id="offline-username"
+                  class="offline-username-input"
+                  placeholder="닉네임 (영문/숫자/_, 3~16자)"
+                  maxlength="16"
+                />
+                <button id="btn-offline-login" class="offline-login-confirm">입장</button>
+              </div>
+            </div>
             <button id="btn-play" class="action-btn play-mode hidden">
               <span>START ADVENTURE</span>
             </button>
@@ -122,7 +148,7 @@
           </div>
 
           <div class="meta-group animate-pop" style="--d: 0.7s">
-            <span class="version-text">v1.20.1 / Forge</span>
+            <span class="version-text" id="app-version-text">런처 확인 중... · MC 1.21.1 Fabric</span>
           </div>
         </div>
       </div>
@@ -143,6 +169,7 @@
             <p id="modal-message" class="modal-message"></p>
           </div>
           <div class="modal-footer">
+            <button id="modal-restart" class="modal-btn hidden" type="button">지금 재시작</button>
             <button id="modal-ok" class="modal-btn" type="button">확인</button>
           </div>
         </div>
@@ -254,8 +281,89 @@
           </div>
 
           <footer class="settings-footer">
+            <button id="settings-logout" class="secondary-btn danger-btn hidden" type="button">
+              로그아웃
+            </button>
             <button id="settings-cancel" class="secondary-btn" type="button">취소</button>
             <button id="settings-save" class="primary-btn" type="button">저장</button>
+          </footer>
+        </section>
+      </div>
+
+      <div class="settings-overlay hidden" id="guide-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+        <section class="settings-panel guide-panel" aria-labelledby="guide-title">
+          <header class="settings-header">
+            <div>
+              <h2 id="guide-title">모험가이드</h2>
+              <p>대컴공 빌리지 서버 전용 가이드입니다.</p>
+            </div>
+            <button class="settings-close" id="guide-close" type="button" aria-label="닫기">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.3 19.7 2.89 18.29 9.17 12 2.89 5.71 4.3 4.3l6.29 6.29 6.3-6.29z"
+                />
+              </svg>
+            </button>
+          </header>
+
+          <div class="guide-content">
+            <section class="guide-section">
+              <h3>이동 (tpa)</h3>
+              <p><code>/tpa [닉네임]</code> 대상에게 순간이동 요청 · <code>/tpahere [닉네임]</code> 대상을 내 위치로 요청</p>
+              <p><code>/tpaccept</code> 요청 수락 · <code>/tpdeny</code> 요청 거절</p>
+            </section>
+            <section class="guide-section">
+              <h3>영토 청구 (Open Parties and Claims)</h3>
+              <p>땅을 원할 때 청구용 도구로 영역을 선택해 내 땅으로 지정할 수 있습니다. 지도(맵) 화면에서 청구 현황을 확인하세요.</p>
+            </section>
+            <section class="guide-section">
+              <h3>포켓몬 교배 &amp; 목장</h3>
+              <p>목장(Pasture) 블록에 포켓몬을 맡기면 알을 낳고, 시간이 지나면 아이템도 드랍합니다.</p>
+            </section>
+            <section class="guide-section">
+              <h3>오프라인 모드</h3>
+              <p>정품 계정이 없어도 로그인 화면에서 "아니요"를 선택해 닉네임만으로 입장할 수 있습니다.</p>
+            </section>
+            <section class="guide-section">
+              <h3>스킨 변경 (FabricTailor)</h3>
+              <p><code>/skin</code> 명령어로 원하는 스킨을 업로드하거나 URL로 지정할 수 있습니다.</p>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <div
+        class="settings-overlay hidden"
+        id="patchnotes-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-hidden="true"
+      >
+        <section class="settings-panel patchnotes-panel" aria-labelledby="patchnotes-title">
+          <header class="settings-header">
+            <div>
+              <h2 id="patchnotes-title">패치노트</h2>
+              <p id="patchnotes-version-label">&nbsp;</p>
+            </div>
+            <button class="settings-close" id="patchnotes-close" type="button" aria-label="닫기">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.3 19.7 2.89 18.29 9.17 12 2.89 5.71 4.3 4.3l6.29 6.29 6.3-6.29z"
+                />
+              </svg>
+            </button>
+          </header>
+
+          <div class="patchnotes-slide">
+            <div class="patchnotes-slide-icon" id="patchnotes-icon"></div>
+            <h3 class="patchnotes-slide-title" id="patchnotes-feature-title"></h3>
+            <p class="patchnotes-slide-desc" id="patchnotes-feature-desc"></p>
+          </div>
+
+          <footer class="patchnotes-footer">
+            <button class="patchnotes-nav" id="patchnotes-prev" type="button" aria-label="이전">‹</button>
+            <div class="patchnotes-dots" id="patchnotes-dots"></div>
+            <button class="patchnotes-nav" id="patchnotes-next" type="button" aria-label="다음">›</button>
           </footer>
         </section>
       </div>

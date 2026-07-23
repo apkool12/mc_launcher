@@ -3,7 +3,7 @@ import { join, normalize } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
-import { setupLauncher } from './launcher'
+import { setupLauncher, resolvePlayerDataConfig } from './launcher'
 import { pingServer } from './serverPing'
 import fs from 'fs'
 
@@ -134,6 +134,8 @@ function registerLaunchPathIpc(mainWindow) {
   if (launchPathIpcRegistered) return
   launchPathIpcRegistered = true
 
+  ipcMain.handle('get-app-version', () => app.getVersion())
+
   ipcMain.handle('get-launch-directory', async () => {
     const config = readLauncherConfig()
     const launchDirectory = config.launchDirectory || getDefaultLaunchDirectory()
@@ -224,33 +226,81 @@ function createWindow() {
 }
 
 // ===== Auto Update (Windows only — see README on macOS constraints) =====
+let autoUpdaterInitialized = false
 function setupAutoUpdater(window) {
   if (process.platform !== 'win32' || !app.isPackaged) return
+  if (autoUpdaterInitialized) return
+  autoUpdaterInitialized = true
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
+  autoUpdater.on('checking-for-update', () => {
+    if (window.isDestroyed()) return
+    window.webContents.send('update-status', '업데이트 확인 중...')
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    if (window.isDestroyed()) return
+    window.webContents.send('update-status', `업데이트 발견 (${info.version}) - 다운로드 중...`)
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    if (window.isDestroyed()) return
+    window.webContents.send('update-status', null)
+  })
+
   autoUpdater.on('update-downloaded', () => {
     if (window.isDestroyed()) return
+    window.webContents.send('update-status', null)
     window.webContents.send('update-ready')
   })
 
   autoUpdater.on('error', (error) => {
     console.error('Auto update error:', error)
+    if (!window.isDestroyed()) window.webContents.send('update-status', null)
   })
 
   autoUpdater.checkForUpdates().catch((error) => {
     console.error('Auto update check failed:', error)
   })
+
+  ipcMain.handle('restart-and-install', () => {
+    autoUpdater.quitAndInstall()
+  })
 }
 
 // ===== Server Status Check Logic =====
+async function fetchMaintenanceFlag() {
+  const cfg = resolvePlayerDataConfig(readBundledManifest())
+  if (!cfg.enabled) return false
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 1500)
+  try {
+    const response = await fetch(`${cfg.url}/health`, {
+      signal: controller.signal,
+      headers: cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {}
+    })
+    if (!response.ok) return false
+    const payload = await response.json()
+    return Boolean(payload.maintenance)
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 function startServerStatusLoop(window) {
   const checkStatus = async () => {
     const serverConfig = getServerConfig()
-    const result = await pingServer(serverConfig.host, serverConfig.port, 1500)
+    const [result, maintenance] = await Promise.all([
+      pingServer(serverConfig.host, serverConfig.port, 1500),
+      fetchMaintenanceFlag()
+    ])
     if (window.isDestroyed()) return
-    window.webContents.send('server-status', result)
+    window.webContents.send('server-status', { ...result, maintenance })
   }
 
   // Check every 5 seconds
